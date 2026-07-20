@@ -1,0 +1,42 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224"/>
+    </clipPath>
+    <clipPath id="coinclip">
+      <circle cx="512" cy="486" r="228"/>
+    </clipPath>
+    <radialGradient id="bg" cx="35%" cy="28%" r="85%">
+      <stop offset="0%" stop-color="#1E3B39"/>
+      <stop offset="100%" stop-color="#122424"/>
+    </radialGradient>
+    <linearGradient id="brassGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E4C989"/>
+      <stop offset="100%" stop-color="#C99A3C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+
+    <!-- coin split into two halves: rust (owes) / sage (owed) -->
+    <g clip-path="url(#coinclip)">
+      <rect x="284" y="258" width="228" height="456" fill="#B24C34"/>
+      <rect x="512" y="258" width="228" height="456" fill="#3F7A5D"/>
+    </g>
+
+    <!-- coin ring -->
+    <circle cx="512" cy="486" r="228" fill="none" stroke="url(#brassGrad)" stroke-width="18"/>
+    <!-- center divider -->
+    <line x1="512" y1="258" x2="512" y2="714" stroke="url(#brassGrad)" stroke-width="10"/>
+
+    <!-- dirham glyph, small, bottom-left half -->
+    <text x="424" y="518" font-family="Georgia, 'Times New Roman', serif" font-size="120" font-weight="700" fill="#F5EFE3" text-anchor="middle">د</text>
+    <text x="600" y="518" font-family="Georgia, 'Times New Roman', serif" font-size="120" font-weight="700" fill="#F5EFE3" text-anchor="middle">إ</text>
+
+    <!-- bottom label plate -->
+    <rect x="152" y="792" width="720" height="112" rx="56" fill="#C99A3C"/>
+    <text x="512" y="868" font-family="Georgia, 'Times New Roman', serif" font-size="66" font-weight="700" fill="#142B2B" text-anchor="middle" letter-spacing="2">NUS · NUS</text>
+  </g>
+</svg>

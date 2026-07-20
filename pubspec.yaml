@@ -1,0 +1,30 @@
+name: nus_nus
+description: "Nus-Nus — split the tab in dirhams, no payments involved."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.5+1
+  flutter_screenutil: ^5.9.3
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  # assets:
+  #   - assets/icon/nus_nus_icon_1024.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/nus_nus_icon_1024.png"
