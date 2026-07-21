@@ -12,7 +12,7 @@ void main() {
           desc: 'Dinner',
           amount: 90,
           payerId: 1,
-          splitWith: [1, 2, 3],
+          splitMap: {1: 30, 2: 30, 3: 30},
         ),
       ];
 

@@ -27,16 +27,18 @@ class ExpenseTile extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: 14.r,
-            backgroundColor: payer?.color ?? AppColors.slate,
-            child: Text(
-              payer != null ? payer!.name[0].toUpperCase() : '?',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12.sp,
-                  fontWeight: FontWeight.w700),
-            ),
+            backgroundColor: expense.isSettlement ? AppColors.sage : (payer?.color ?? AppColors.slate),
+            child: expense.isSettlement 
+              ? Icon(Icons.check, size: 16.r, color: Colors.white)
+              : Text(
+                  payer != null ? payer!.name[0].toUpperCase() : '?',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.w700),
+                ),
           ),
-          10.verticalSpace,
+          10.horizontalSpace,
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -46,10 +48,12 @@ class ExpenseTile extends StatelessWidget {
                   style: TextStyle(
                       fontSize: 13.5.sp,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink),
+                      color: expense.isSettlement ? AppColors.sage : AppColors.ink),
                 ),
                 Text(
-                  '${payer?.name ?? '—'} paid · split with $splitNames',
+                  expense.isSettlement 
+                    ? 'Payment recorded'
+                    : '${payer?.name ?? '—'} paid · split with $splitNames',
                   style: TextStyle(fontSize: 11.5.sp, color: AppColors.slate),
                 ),
               ],
@@ -60,7 +64,7 @@ class ExpenseTile extends StatelessWidget {
             style: TextStyle(
                 fontSize: 13.5.sp,
                 fontWeight: FontWeight.w700,
-                color: AppColors.ink),
+                color: expense.isSettlement ? AppColors.sage : AppColors.ink),
           ),
           IconButton(
             icon: Icon(Icons.close, size: 16.w, color: AppColors.slate),

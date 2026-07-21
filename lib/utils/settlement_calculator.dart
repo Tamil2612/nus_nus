@@ -15,9 +15,10 @@ class SettlementCalculator {
     final net = <int, double>{for (final id in personIds) id: 0.0};
     for (final e in expenses) {
       net[e.payerId] = (net[e.payerId] ?? 0) + e.amount;
-      final share = e.shareEach;
-      for (final id in e.splitWith) {
-        net[id] = (net[id] ?? 0) - share;
+      for (final entry in e.splitMap.entries) {
+        final id = entry.key;
+        final amountOwed = entry.value;
+        net[id] = (net[id] ?? 0) - amountOwed;
       }
     }
     return net;
