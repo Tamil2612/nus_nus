@@ -5,8 +5,9 @@ import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
+import 'providers/auth_provider.dart';
 import 'providers/split_provider.dart';
-import 'screens/split_home_screen.dart';
+import 'screens/auth_gate.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -24,13 +25,17 @@ Future<void> main() async {
 
   runApp(const NusNusApp());
 }
+
 class NusNusApp extends StatelessWidget {
   const NusNusApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => SplitProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => SplitProvider()),
+      ],
       child: ScreenUtilInit(
         designSize: const Size(375, 812),
         minTextAdapt: true,
@@ -39,7 +44,7 @@ class NusNusApp extends StatelessWidget {
           title: 'Nus-Nus',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.dark,
-          home: const SplitHomeScreen(),
+          home: const AuthGate(),
         ),
       ),
     );

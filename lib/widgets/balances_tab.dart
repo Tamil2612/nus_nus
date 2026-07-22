@@ -77,7 +77,7 @@ class BalancesTab extends StatelessWidget {
     final provider = context.watch<SplitProvider>();
     final net = provider.balances;
     final people = _visiblePeople(provider, net);
-    final transfers = provider.settlement;
+    final pairsToSettle = provider.pairBalances;
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(16.w),
@@ -201,11 +201,11 @@ class BalancesTab extends StatelessWidget {
                 const SectionTitle(title: 'Settle up'),
                 6.verticalSpace,
                 Text(
-                  'The fewest payments needed to zero everyone out.',
+                  'Every pair with an open balance — settle each one individually.',
                   style: TextStyle(fontSize: 11.5.sp, color: AppColors.slate),
                 ),
                 14.verticalSpace,
-                if (transfers.isEmpty)
+                if (pairsToSettle.isEmpty)
                   Padding(
                     padding: EdgeInsets.symmetric(vertical: 12.h),
                     child: Row(
@@ -224,9 +224,9 @@ class BalancesTab extends StatelessWidget {
                     ),
                   )
                 else
-                  ...transfers.map((t) {
-                    final from = provider.personById(t.fromId);
-                    final to = provider.personById(t.toId);
+                  ...pairsToSettle.map((pb) {
+                    final from = provider.personById(pb.debtorId!);
+                    final to = provider.personById(pb.creditorId!);
                     return Container(
                       margin: EdgeInsets.only(bottom: 10.h),
                       padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
@@ -257,7 +257,7 @@ class BalancesTab extends StatelessWidget {
                                         fontSize: 13.sp,
                                         color: AppColors.ink)),
                                 8.horizontalSpace,
-                                Text(fmtAed(t.amount),
+                                Text(fmtAed(pb.owedAmount),
                                     style: TextStyle(
                                         fontWeight: FontWeight.w700,
                                         fontSize: 13.sp,
@@ -267,8 +267,8 @@ class BalancesTab extends StatelessWidget {
                           ),
                           8.horizontalSpace,
                           ElevatedButton(
-                            onPressed: () => _confirmSettle(
-                                context, provider, t.fromId, t.toId, t.amount),
+                            onPressed: () => _confirmSettle(context, provider,
+                                pb.debtorId!, pb.creditorId!, pb.owedAmount),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.sage,
                               foregroundColor: Colors.white,

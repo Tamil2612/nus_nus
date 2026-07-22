@@ -5,6 +5,7 @@ import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'common_atoms.dart';
+import 'add_member_sheet.dart';
 import 'expense_form_sheet.dart';
 import 'expense_tile.dart';
 import 'person_chip.dart';
@@ -138,6 +139,20 @@ class _LedgerTabState extends State<LedgerTab> {
                       child: const Text('Add'),
                     ),
                   ],
+                ),
+                8.verticalSpace,
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => showAddRegisteredMemberSheet(context),
+                    icon: Icon(Icons.person_search, size: 16.r, color: AppColors.brass),
+                    label: Text(
+                      'Or add from registered members',
+                      style: TextStyle(
+                          fontSize: 12.sp,
+                          color: AppColors.brass,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 ),
               ],
             ),

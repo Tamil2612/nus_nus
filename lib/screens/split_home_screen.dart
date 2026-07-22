@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -236,6 +237,22 @@ class SplitHomeScreen extends StatelessWidget {
                     Text('Your Split Groups',
                         style:
                             TextStyle(color: AppColors.slate, fontSize: 12.sp)),
+                    Builder(builder: (context) {
+                      final user = context.watch<AuthProvider>().currentUser;
+                      if (user == null) return const SizedBox.shrink();
+                      return Padding(
+                        padding: EdgeInsets.only(top: 8.h),
+                        child: Text(
+                          user.displayName?.isNotEmpty == true
+                              ? user.displayName!
+                              : (user.email ?? ''),
+                          style: TextStyle(
+                              color: AppColors.brassSoft,
+                              fontSize: 11.5.sp,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -306,6 +323,18 @@ class SplitHomeScreen extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+            const Divider(color: AppColors.line, height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout, color: AppColors.rust),
+              title: const Text(
+                'Sign out',
+                style: TextStyle(color: AppColors.rust, fontWeight: FontWeight.w600),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                await context.read<AuthProvider>().signOut();
+              },
             ),
             20.verticalSpace
           ],

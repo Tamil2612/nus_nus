@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../data/database_helper.dart';
+import '../data/firestore_repository.dart';
 import '../models/expense.dart';
 import '../models/ledger_entry.dart';
 import '../models/pair_balance.dart';
@@ -15,15 +15,33 @@ class SplitProvider extends ChangeNotifier {
   int _currentGroupIndex = -1;
   int _nextId = 1;
   bool _isLoading = true;
-
-  SplitProvider() {
-    _loadFromDisk();
-  }
+  String? _uid;
 
   bool get isLoading => _isLoading;
 
-  Future<void> _loadFromDisk() async {
-    final loaded = await DatabaseHelper.instance.loadAll();
+  /// Called by [AuthGate] whenever the signed-in user changes. Loads that
+  /// user's data from Firestore, or clears everything back to a blank
+  /// slate when [uid] is null (signed out).
+  Future<void> setUserId(String? uid) async {
+    if (_uid == uid) return;
+    _uid = uid;
+
+    if (uid == null) {
+      _groups.clear();
+      _currentGroupIndex = -1;
+      _nextId = 1;
+      _isLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    _isLoading = true;
+    notifyListeners();
+    await _loadFromCloud(uid);
+  }
+
+  Future<void> _loadFromCloud(String uid) async {
+    final loaded = await FirestoreRepository.instance.loadAll(uid);
     _groups
       ..clear()
       ..addAll(loaded);
@@ -46,10 +64,11 @@ class SplitProvider extends ChangeNotifier {
 
   /// Fire-and-forget persistence: the in-memory state is already the
   /// source of truth for the UI (notifyListeners happens synchronously in
-  /// every mutator), this just mirrors it to disk in the background.
+  /// every mutator), this just mirrors it to Firestore in the background.
   void _persist() {
-    // Not awaited on purpose — mutators stay synchronous for the UI.
-    DatabaseHelper.instance.saveAll(_groups);
+    final uid = _uid;
+    if (uid == null) return; // not signed in yet — nothing to save to
+    FirestoreRepository.instance.saveAll(uid, _groups);
   }
 
   List<Group> get groups => List.unmodifiable(_groups);
@@ -133,15 +152,21 @@ class SplitProvider extends ChangeNotifier {
     return null;
   }
 
-  void addPerson(String name) {
+  void addPerson(String name, {String? linkedUserId}) {
     if (currentGroup == null) return;
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
+
+    if (linkedUserId != null &&
+        allPeople.any((p) => p.linkedUserId == linkedUserId && !p.archived)) {
+      return; // already a member of this group
+    }
 
     final newPerson = Person(
       id: _nextId++,
       name: trimmed,
       color: AppColors.avatarColorFor(allPeople.length),
+      linkedUserId: linkedUserId,
     );
 
     final updatedMembers = [...allPeople, newPerson];
@@ -277,13 +302,6 @@ class SplitProvider extends ChangeNotifier {
     _persist();
   }
 
-  /// Edits an existing expense in place — per the "never edit history via
-  /// settlement" rule, this is for genuine corrections (wrong amount,
-  /// wrong payer, typo in description), not for recording payments. Real
-  /// payments should always go through [settleUp], which adds a new
-  /// ledger entry instead of touching old ones.
-  ///
-  /// Returns null on success, or an error message.
   String? editExpense({
     required int id,
     required String desc,

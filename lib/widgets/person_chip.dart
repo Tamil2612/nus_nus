@@ -36,6 +36,10 @@ class PersonChip extends StatelessWidget {
             style: TextStyle(
                 fontSize: 13.sp, fontWeight: FontWeight.w600, color: AppColors.ink),
           ),
+          if (person.linkedUserId != null) ...[
+            4.horizontalSpace,
+            Icon(Icons.verified, size: 13.r, color: AppColors.brass),
+          ],
           GestureDetector(
             onTap: onRemove,
             child:  Padding(
