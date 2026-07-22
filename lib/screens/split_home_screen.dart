@@ -7,7 +7,9 @@ import '../theme/app_theme.dart';
 import '../widgets/balances_tab.dart';
 import '../widgets/header_bar.dart';
 import '../widgets/ledger_tab.dart';
-import '../widgets/expense_form.dart';
+import '../widgets/expense_form_sheet.dart';
+import '../widgets/overview_tab.dart';
+import 'nus_ai_screen.dart';
 
 class SplitHomeScreen extends StatelessWidget {
   const SplitHomeScreen({super.key});
@@ -18,20 +20,25 @@ class SplitHomeScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.paper,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: const Text('New Group', style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        title: const Text('New Group',
+            style:
+                TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           style: TextStyle(color: AppColors.ink, fontSize: 16.sp),
-          decoration: AppTheme.inputDecoration('Group Name (e.g. Vacation)').copyWith(
+          decoration:
+              AppTheme.inputDecoration('Group Name (e.g. Vacation)').copyWith(
             filled: false,
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.slate)),
+            child:
+                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -41,7 +48,8 @@ class SplitHomeScreen extends StatelessWidget {
               }
             },
             style: AppTheme.solidButton.copyWith(
-              padding: WidgetStateProperty.all(EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h)),
+              padding: WidgetStateProperty.all(
+                  EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h)),
             ),
             child: const Text('Create'),
           ),
@@ -50,46 +58,54 @@ class SplitHomeScreen extends StatelessWidget {
     );
   }
 
-  void _showAddExpenseSheet(BuildContext context) {
-    showModalBottomSheet(
+  Future<void> _confirmDeleteGroup(BuildContext context, SplitProvider provider,
+      int groupId, String name) async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.paper,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        title: Text('Delete "$name"?',
+            style: const TextStyle(
+                color: AppColors.ink, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'This permanently deletes the group along with all its members '
+          'and expense history. This can\'t be undone.',
+          style: TextStyle(color: AppColors.slate),
         ),
-        decoration: BoxDecoration(
-          color: AppColors.paper,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20.r)),
-        ),
-        child: SingleChildScrollView(
-          padding: EdgeInsets.all(20.w),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40.w,
-                height: 4.h,
-                margin: EdgeInsets.only(bottom: 20.h),
-                decoration: BoxDecoration(
-                  color: AppColors.line,
-                  borderRadius: BorderRadius.circular(2.r),
-                ),
-              ),
-              Text(
-                'Add New Expense',
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.ink,
-                ),
-              ),
-              20.verticalSpace,
-              const ExpenseForm(),
-            ],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child:
+                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
           ),
-        ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: AppTheme.solidButton.copyWith(
+              backgroundColor: WidgetStateProperty.all(AppColors.rust),
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      provider.removeGroup(groupId);
+      if (context.mounted) Navigator.pop(context); // close the drawer
+    }
+  }
+
+  void _showAddExpenseSheet(BuildContext context) {
+    showExpenseFormSheet(context);
+  }
+
+  void _openNusAi(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AiExpenseScreen(),
       ),
     );
   }
@@ -100,32 +116,90 @@ class SplitHomeScreen extends StatelessWidget {
     final currentGroup = provider.currentGroup;
     final totalSpent = provider.totalSpent;
 
+    if (provider.isLoading) {
+      return const Scaffold(
+        body: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment(-0.4, -0.6),
+              radius: 1.2,
+              colors: [AppColors.inkSoft, AppColors.ink],
+            ),
+          ),
+          child: Center(
+            child: CircularProgressIndicator(color: AppColors.brass),
+          ),
+        ),
+      );
+    }
+
     if (currentGroup == null) {
       return Scaffold(
-        backgroundColor: AppColors.ink,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.account_balance_wallet_outlined, size: 80.r, color: AppColors.brass),
-              24.verticalSpace,
-              Text(
-                'Welcome to Nus-Nus',
-                style: TextStyle(color: AppColors.paper, fontSize: 24.sp, fontWeight: FontWeight.bold),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment(-0.4, -0.6),
+              radius: 1.2,
+              colors: [AppColors.inkSoft, AppColors.ink],
+            ),
+          ),
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32.w),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 96.r,
+                    height: 96.r,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.brass, width: 3),
+                    ),
+                    child: Icon(Icons.account_balance_wallet_outlined,
+                        size: 44.r, color: AppColors.brass),
+                  ),
+                  24.verticalSpace,
+                  RichText(
+                    text: TextSpan(
+                      style: TextStyle(
+                          fontSize: 28.sp,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.paper,
+                          fontFamily: 'Georgia'),
+                      children: [
+                        const TextSpan(text: 'Nus'),
+                        TextSpan(
+                            text: '·',
+                            style: TextStyle(color: AppColors.brass)),
+                        const TextSpan(text: 'Nus'),
+                      ],
+                    ),
+                  ),
+                  8.verticalSpace,
+                  Text(
+                    'Track shared expenses without the hassle.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.slate, fontSize: 14.sp),
+                  ),
+                  32.verticalSpace,
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _showAddGroup(context, provider),
+                      style: AppTheme.solidButton.copyWith(
+                        backgroundColor:
+                            WidgetStateProperty.all(AppColors.brass),
+                        padding: WidgetStateProperty.all(
+                            EdgeInsets.symmetric(vertical: 16.h)),
+                      ),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create your first group'),
+                    ),
+                  ),
+                ],
               ),
-              8.verticalSpace,
-              Text(
-                'Track shared expenses without the hassle.',
-                style: TextStyle(color: AppColors.slate, fontSize: 14.sp),
-              ),
-              32.verticalSpace,
-              ElevatedButton.icon(
-                onPressed: () => _showAddGroup(context, provider),
-                style: AppTheme.solidButton,
-                icon: const Icon(Icons.add),
-                label: const Text('Create your first group'),
-              ),
-            ],
+            ),
           ),
         ),
       );
@@ -145,16 +219,23 @@ class SplitHomeScreen extends StatelessWidget {
                   children: [
                     RichText(
                       text: TextSpan(
-                        style: TextStyle(fontSize: 24.sp, fontWeight: FontWeight.bold, color: AppColors.paper),
+                        style: TextStyle(
+                            fontSize: 24.sp,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.paper),
                         children: [
                           const TextSpan(text: 'Nus'),
-                          TextSpan(text: '·', style: TextStyle(color: AppColors.brass)),
+                          TextSpan(
+                              text: '·',
+                              style: TextStyle(color: AppColors.brass)),
                           const TextSpan(text: 'Nus'),
                         ],
                       ),
                     ),
                     4.verticalSpace,
-                    Text('Your Split Groups', style: TextStyle(color: AppColors.slate, fontSize: 12.sp)),
+                    Text('Your Split Groups',
+                        style:
+                            TextStyle(color: AppColors.slate, fontSize: 12.sp)),
                   ],
                 ),
               ),
@@ -168,13 +249,23 @@ class SplitHomeScreen extends StatelessWidget {
                     final g = entry.value;
                     final isSelected = currentGroup.id == g.id;
                     return ListTile(
-                      leading: Icon(Icons.group, color: isSelected ? AppColors.brass : AppColors.slate),
+                      leading: Icon(Icons.group,
+                          color:
+                              isSelected ? AppColors.brass : AppColors.slate),
                       title: Text(
                         g.name,
                         style: TextStyle(
                           color: AppColors.ink,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
                         ),
+                      ),
+                      trailing: IconButton(
+                        icon: Icon(Icons.delete_outline,
+                            size: 20.r, color: AppColors.slate),
+                        onPressed: () => _confirmDeleteGroup(
+                            context, provider, g.id, g.name),
+                        tooltip: 'Delete group',
                       ),
                       selected: isSelected,
                       selectedTileColor: AppColors.brass.withValues(alpha: 0.1),
@@ -220,41 +311,112 @@ class SplitHomeScreen extends StatelessWidget {
           ],
         ),
       ),
-      body: SafeArea(
-        child: DefaultTabController(
-          length: 2,
-          child: Column(
-            children: [
-              HeaderBar(totalSpent: totalSpent),
-              TabBar(
-                labelColor: AppColors.brass,
-                unselectedLabelColor: AppColors.slate,
-                indicatorColor: AppColors.brass,
-                indicatorWeight: 3.h,
-                labelStyle: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold),
-                tabs: const [
-                  Tab(text: 'Activity'),
-                  Tab(text: 'Balances'),
-                ],
-              ),
-              const Expanded(
-                child: TabBarView(
-                  children: [
-                    LedgerTab(),
-                    BalancesTab(),
-                  ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(-0.5, -0.8),
+            radius: 1.4,
+            colors: [AppColors.inkSoft, AppColors.ink],
+          ),
+        ),
+        child: SafeArea(
+          child: DefaultTabController(
+            length: 3,
+            child: Column(
+              children: [
+                HeaderBar(totalSpent: totalSpent),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.w),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12.r),
+                    ),
+                    child: TabBar(
+                      labelColor: AppColors.ink,
+                      unselectedLabelColor: AppColors.slate,
+                      indicator: BoxDecoration(
+                        color: AppColors.brassSoft,
+                        borderRadius: BorderRadius.circular(10.r),
+                      ),
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      indicatorPadding: EdgeInsets.all(4.r),
+                      dividerColor: Colors.transparent,
+                      labelStyle: TextStyle(
+                          fontSize: 12.5.sp, fontWeight: FontWeight.bold),
+                      tabs: const [
+                        Tab(text: 'Activity'),
+                        Tab(text: 'Balances'),
+                        Tab(text: 'Overview'),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ],
+                8.verticalSpace,
+                const Expanded(
+                  child: TabBarView(
+                    children: [
+                      LedgerTab(),
+                      BalancesTab(),
+                      OverviewTab(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showAddExpenseSheet(context),
-        backgroundColor: AppColors.paperDim,
-        foregroundColor: AppColors.inkSoft,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Split'),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          SizedBox(
+            height: 45.h,
+            child: FloatingActionButton.extended(
+              heroTag: null,
+              onPressed: () => _openNusAi(context),
+              backgroundColor: AppColors.brass,
+              foregroundColor: AppColors.ink,
+              elevation: 4,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
+              icon: Image.asset(
+                'assets/icon/ai.png',
+                width: 18.w,
+                height: 18.w,
+              ),
+              label: Text(
+                'Nus Ai',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.sp,
+                ),
+              ),
+            ),
+          ),
+          12.verticalSpace,
+          SizedBox(
+            height: 45.h,
+            child: FloatingActionButton.extended(
+              onPressed: () => _showAddExpenseSheet(context),
+              heroTag: null,
+              backgroundColor: AppColors.brass,
+              foregroundColor: AppColors.ink,
+              elevation: 4,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
+              icon: Icon(Icons.add, size: 18.sp),
+              label: Text(
+                'Add Split',
+                style: TextStyle(
+                  fontSize: 12.sp,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

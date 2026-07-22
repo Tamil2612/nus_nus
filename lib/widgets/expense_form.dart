@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
+import '../models/expense.dart';
 import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
@@ -8,7 +9,14 @@ import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 
 class ExpenseForm extends StatefulWidget {
-  const ExpenseForm({super.key});
+  /// When set, the form edits this expense in place instead of creating a
+  /// new one. Settlement expenses can't be edited here — corrections to a
+  /// settlement should just be deleted and re-recorded.
+  final Expense? existingExpense;
+
+  const ExpenseForm({super.key, this.existingExpense});
+
+  bool get isEditing => existingExpense != null;
 
   @override
   State<ExpenseForm> createState() => _ExpenseFormState();
@@ -21,11 +29,32 @@ class _ExpenseFormState extends State<ExpenseForm> {
   final Set<int> _splitSelection = {};
   bool _isEqualSplit = true;
   final Map<int, TextEditingController> _customSplitCtrls = {};
+  bool _prefilled = false;
 
   @override
   void initState() {
     super.initState();
     _amountCtrl.addListener(_onAmountChanged);
+    final existing = widget.existingExpense;
+    if (existing != null) {
+      _descCtrl.text = existing.desc;
+      _amountCtrl.text = existing.amount.toStringAsFixed(2);
+      _payerId = existing.payerId;
+      _splitSelection.addAll(existing.splitMap.keys);
+      // If every share is (roughly) equal, default to the simpler equal-split
+      // view; otherwise show the custom breakdown so nothing looks wrong.
+      final shares = existing.splitMap.values.toList();
+      final allEqual = shares.isNotEmpty &&
+          shares.every((s) => (s - shares.first).abs() < 0.02);
+      _isEqualSplit = allEqual;
+      if (!allEqual) {
+        existing.splitMap.forEach((id, share) {
+          final ctrl = TextEditingController(text: share.toStringAsFixed(2));
+          ctrl.addListener(_onAmountChanged);
+          _customSplitCtrls[id] = ctrl;
+        });
+      }
+    }
   }
 
   @override
@@ -45,21 +74,25 @@ class _ExpenseFormState extends State<ExpenseForm> {
 
   void _syncSelectionWith(List<Person> people) {
     final ids = people.map((p) => p.id).toSet();
-    _splitSelection.removeWhere((id) => !ids.contains(id));
-    
-    // Default: everyone in the group is part of the split if it's empty
-    if (_splitSelection.isEmpty && people.isNotEmpty) {
-      for (final p in people) {
-        _splitSelection.add(p.id);
+
+    // Only auto-default to "everyone" for a brand new expense. When
+    // editing, an empty selection should stay empty (the user is actively
+    // clearing it) rather than snapping back to the original set.
+    if (!widget.isEditing || _prefilled) {
+      _splitSelection.removeWhere((id) => !ids.contains(id));
+      if (_splitSelection.isEmpty && people.isNotEmpty && !widget.isEditing) {
+        for (final p in people) {
+          _splitSelection.add(p.id);
+        }
       }
     }
+    _prefilled = true;
 
     _payerId ??= people.isNotEmpty ? people.first.id : null;
     if (_payerId != null && !ids.contains(_payerId)) {
       _payerId = people.isNotEmpty ? people.first.id : null;
     }
 
-    // Ensure we have controllers for custom splits
     for (var id in _splitSelection) {
       if (!_customSplitCtrls.containsKey(id)) {
         final ctrl = TextEditingController();
@@ -89,18 +122,27 @@ class _ExpenseFormState extends State<ExpenseForm> {
       }
     }
 
-    final error = provider.addExpense(
-      desc: _descCtrl.text,
-      amount: totalAmount,
-      payerId: _payerId,
-      splitWith: _splitSelection,
-      customSplits: customSplits,
-    );
+    final error = widget.isEditing
+        ? provider.editExpense(
+            id: widget.existingExpense!.id,
+            desc: _descCtrl.text,
+            amount: totalAmount,
+            payerId: _payerId,
+            splitWith: _splitSelection,
+            customSplits: customSplits,
+          )
+        : provider.addExpense(
+            desc: _descCtrl.text,
+            amount: totalAmount,
+            payerId: _payerId,
+            splitWith: _splitSelection,
+            customSplits: customSplits,
+          );
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error, style: const TextStyle(color: Colors.white)), 
+          content: Text(error, style: const TextStyle(color: Colors.white)),
           backgroundColor: AppColors.rust,
           behavior: SnackBarBehavior.floating,
         ),
@@ -108,26 +150,27 @@ class _ExpenseFormState extends State<ExpenseForm> {
       return;
     }
 
-    _descCtrl.clear();
-    _amountCtrl.clear();
-    for (var ctrl in _customSplitCtrls.values) {
-      ctrl.clear();
+    if (!widget.isEditing) {
+      _descCtrl.clear();
+      _amountCtrl.clear();
+      for (var ctrl in _customSplitCtrls.values) {
+        ctrl.clear();
+      }
+      setState(() => _isEqualSplit = true);
     }
-    setState(() {
-      _isEqualSplit = true;
-    });
-    
-    // Check if we are inside a bottom sheet/dialog and close it
+
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
     }
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Expense added successfully!'),
+      SnackBar(
+        content: Text(widget.isEditing
+            ? 'Expense updated.'
+            : 'Expense added successfully!'),
         backgroundColor: AppColors.sage,
         behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 1),
+        duration: const Duration(seconds: 1),
       ),
     );
   }
@@ -174,13 +217,14 @@ class _ExpenseFormState extends State<ExpenseForm> {
                 items: people
                     .map(
                       (p) => DropdownMenuItem(
-                    value: p.id,
-                    child: Text(
-                      p.name,
-                      style: TextStyle(fontSize: 13.sp, color: AppColors.ink),
-                    ),
-                  ),
-                )
+                        value: p.id,
+                        child: Text(
+                          p.name,
+                          style:
+                              TextStyle(fontSize: 13.sp, color: AppColors.ink),
+                        ),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) => setState(() => _payerId = v),
               ),
@@ -201,10 +245,14 @@ class _ExpenseFormState extends State<ExpenseForm> {
             ),
             TextButton.icon(
               onPressed: () => setState(() => _isEqualSplit = !_isEqualSplit),
-              icon: Icon(_isEqualSplit ? Icons.call_split : Icons.plus_one, size: 16.sp, color: AppColors.brass),
+              icon: Icon(_isEqualSplit ? Icons.call_split : Icons.equalizer_rounded,
+                  size: 16.sp, color: AppColors.brass),
               label: Text(
                 _isEqualSplit ? 'Split Unequally' : 'Split Equally',
-                style: TextStyle(fontSize: 11.sp, color: AppColors.brass, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    fontSize: 11.sp,
+                    color: AppColors.brass,
+                    fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -221,13 +269,19 @@ class _ExpenseFormState extends State<ExpenseForm> {
               }),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                padding:
-                     EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
+                padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
                 decoration: BoxDecoration(
                   color: on ? AppColors.ink : Colors.white,
                   borderRadius: BorderRadius.circular(12.r),
                   border: Border.all(color: on ? AppColors.ink : AppColors.line),
-                  boxShadow: on ? [BoxShadow(color: AppColors.ink.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 2))] : null,
+                  boxShadow: on
+                      ? [
+                          BoxShadow(
+                              color: AppColors.ink.withOpacity(0.2),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2))
+                        ]
+                      : null,
                 ),
                 child: Text(
                   p.name,
@@ -254,23 +308,41 @@ class _ExpenseFormState extends State<ExpenseForm> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Allocated: ${fmtAed(allocated)}', 
-                      style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold, color: AppColors.ink)),
-                    Text(isSettled ? 'Matches total!' : 'Remaining: ${fmtAed(totalAmount - allocated)}',
+                    Text('Allocated: ${fmtAed(allocated)}',
+                        style: TextStyle(
+                            fontSize: 12.sp,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.ink)),
+                    Text(
+                      isSettled
+                          ? 'Matches total!'
+                          : (allocated > totalAmount
+                              ? 'Over by ${fmtAed(allocated - totalAmount)}'
+                              : 'Remaining: ${fmtAed(totalAmount - allocated)}'),
                       style: TextStyle(
-                        fontSize: 12.sp, 
-                        fontWeight: FontWeight.bold, 
-                        color: isSettled ? AppColors.sage : (allocated > totalAmount ? AppColors.rust : AppColors.slate)
-                      )),
+                          fontSize: 12.sp,
+                          fontWeight: FontWeight.bold,
+                          color: isSettled
+                              ? AppColors.sage
+                              : (allocated > totalAmount
+                                  ? AppColors.rust
+                                  : AppColors.slate)),
+                    ),
                   ],
                 ),
                 8.verticalSpace,
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4.r),
                   child: LinearProgressIndicator(
-                    value: totalAmount > 0 ? (allocated / totalAmount).clamp(0, 1.1) : 0,
+                    value: totalAmount > 0
+                        ? (allocated / totalAmount).clamp(0, 1.1)
+                        : 0,
                     backgroundColor: Colors.white,
-                    color: isSettled ? AppColors.sage : (allocated > totalAmount ? AppColors.rust : AppColors.brass),
+                    color: isSettled
+                        ? AppColors.sage
+                        : (allocated > totalAmount
+                            ? AppColors.rust
+                            : AppColors.brass),
                     minHeight: 6.h,
                   ),
                 ),
@@ -279,7 +351,11 @@ class _ExpenseFormState extends State<ExpenseForm> {
           ),
           12.verticalSpace,
           ..._splitSelection.map((id) {
-            final person = people.firstWhere((p) => p.id == id);
+            final person = people.firstWhere(
+              (p) => p.id == id,
+              orElse: () => provider.personById(id) ??
+                  Person(id: id, name: '?', color: AppColors.slate),
+            );
             return Padding(
               padding: EdgeInsets.only(bottom: 10.h),
               child: Row(
@@ -287,19 +363,30 @@ class _ExpenseFormState extends State<ExpenseForm> {
                   CircleAvatar(
                     radius: 12.r,
                     backgroundColor: person.color,
-                    child: Text(person.name[0], style: TextStyle(color: Colors.white, fontSize: 10.sp, fontWeight: FontWeight.bold)),
+                    child: Text(person.name[0],
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.sp,
+                            fontWeight: FontWeight.bold)),
                   ),
                   8.horizontalSpace,
-                  Expanded(child: Text(person.name, style: TextStyle(color: AppColors.ink, fontSize: 13.sp, fontWeight: FontWeight.w500))),
+                  Expanded(
+                      child: Text(person.name,
+                          style: TextStyle(
+                              color: AppColors.ink,
+                              fontSize: 13.sp,
+                              fontWeight: FontWeight.w500))),
                   SizedBox(
                     width: 120.w,
                     child: TextField(
                       controller: _customSplitCtrls[id],
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
                       style: TextStyle(fontSize: 13.sp, color: AppColors.ink),
                       textAlign: TextAlign.right,
                       decoration: AppTheme.inputDecoration('0.00').copyWith(
-                        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
                       ),
                     ),
                   ),
@@ -315,7 +402,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
           child: ElevatedButton(
             onPressed: () => _submit(provider),
             style: AppTheme.solidButton,
-            child: Text('Add expense', style: TextStyle(fontSize: 14.sp)),
+            child: Text(widget.isEditing ? 'Save changes' : 'Add expense',
+                style: TextStyle(fontSize: 14.sp)),
           ),
         ),
       ],

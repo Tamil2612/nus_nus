@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "943318599338",
+    "project_id": "nus-nus",
+    "storage_bucket": "nus-nus.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:943318599338:android:a7f4ae35917b5f712b72d3",
+        "android_client_info": {
+          "package_name": "com.example.nus_nus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBadfAj0AzMH5Lz1wwcwrzQZmuJCpFGJrw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
