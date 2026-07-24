@@ -6,22 +6,24 @@ import '../theme/app_colors.dart';
 import '../utils/currency_formatter.dart';
 import 'common_atoms.dart';
 
-/// Shows each person's net settle-up amount summed across *every* group,
-/// not just the one currently open. People are matched by name since
-/// there's no shared identity across groups — see
-/// [SplitProvider.overallBalancesByName].
+/// Shows exactly where the *signed-in user* personally stands — never
+/// anyone else's balance with anyone else — combined across every group
+/// they're a participant in. Split into two explicit lists ("owed to
+/// you" / "you owe") rather than one merged one, so it's immediately
+/// obvious which direction each amount goes.
 class OverviewTab extends StatelessWidget {
   const OverviewTab({super.key});
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
-    final overall = provider.overallBalancesByName;
+    final mine = provider.myBalancesByPerson();
+    final owedToYou = mine.where((o) => o.amount > 0.005).toList();
+    final youOwe = mine.where((o) => o.amount < -0.005).toList();
     final totalOwedToYou =
-        overall.where((o) => o.amount > 0).fold(0.0, (s, o) => s + o.amount);
-    final totalYouOwe = overall
-        .where((o) => o.amount < 0)
-        .fold(0.0, (s, o) => s + o.amount.abs());
+        owedToYou.fold(0.0, (s, o) => s + o.amount);
+    final totalYouOwe =
+        youOwe.fold(0.0, (s, o) => s + o.amount.abs());
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(16.w),
@@ -50,87 +52,20 @@ class OverviewTab extends StatelessWidget {
             ),
           ),
           16.verticalSpace,
-          _panel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SectionTitle(title: 'All Groups, Combined'),
-                6.verticalSpace,
-                Text(
-                  'Everyone\'s total settle-up amount across every group '
-                  'they\'re in, matched by name.',
-                  style: TextStyle(fontSize: 11.5.sp, color: AppColors.slate),
-                ),
-                14.verticalSpace,
-                if (overall.isEmpty)
-                  const EmptyHint(
-                      'No balances yet — add expenses in a group to see totals here.')
-                else
-                  ...overall.map((o) {
-                    final owed = o.amount > 0.005;
-                    final owes = o.amount < -0.005;
-                    final color = owed
-                        ? AppColors.sage
-                        : (owes ? AppColors.rust : AppColors.slate);
-                    final label =
-                        owed ? 'is owed' : (owes ? 'owes' : 'settled');
-                    return Container(
-                      margin: EdgeInsets.only(bottom: 8.h),
-                      padding: EdgeInsets.symmetric(
-                          horizontal: 12.w, vertical: 10.h),
-                      decoration: BoxDecoration(
-                        color: AppColors.paperDim,
-                        borderRadius: BorderRadius.circular(10.r),
-                        border: Border.all(color: AppColors.line),
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 14.r,
-                            backgroundColor: color.withOpacity(0.85),
-                            child: Text(
-                              o.name.isNotEmpty ? o.name[0].toUpperCase() : '?',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12.sp,
-                                  fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          10.horizontalSpace,
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  o.name,
-                                  style: TextStyle(
-                                      fontSize: 13.5.sp,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.ink),
-                                ),
-                                Text(
-                                  'across ${o.groupCount} group${o.groupCount == 1 ? '' : 's'}',
-                                  style: TextStyle(
-                                      fontSize: 11.sp, color: AppColors.slate),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Text(
-                            '$label ${fmtAed(o.amount.abs())}',
-                            style: TextStyle(
-                                fontSize: 13.sp,
-                                fontWeight: FontWeight.w700,
-                                color: color),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-              ],
-            ),
+          _PersonListSection(
+            title: 'OWED TO YOU',
+            entries: owedToYou,
+            color: AppColors.sage,
+            emptyHint: 'Nobody owes you anything right now.',
           ),
-          16.verticalSpace,
+          24.verticalSpace,
+          _PersonListSection(
+            title: 'YOU OWE',
+            entries: youOwe,
+            color: AppColors.rust,
+            emptyHint: "You don't owe anyone anything right now.",
+          ),
+          80.verticalSpace,
         ],
       ),
     );
@@ -145,12 +80,12 @@ class OverviewTab extends StatelessWidget {
                 fontSize: 10.sp,
                 letterSpacing: 1.2,
                 color: AppColors.slate,
-                fontWeight: FontWeight.w600)),
+                fontWeight: FontWeight.w900)),
         6.verticalSpace,
         Text(
           fmtAed(amount),
           style: TextStyle(
-              fontSize: 18.sp, fontWeight: FontWeight.w800, color: color),
+              fontSize: 18.sp, fontWeight: FontWeight.w900, color: color),
         ),
       ],
     );
@@ -165,13 +100,160 @@ class OverviewTab extends StatelessWidget {
         borderRadius: BorderRadius.circular(14.r),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.18),
+            color: Colors.black.withValues(alpha: 0.18),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
         ],
       ),
       child: child,
+    );
+  }
+}
+
+class _PersonListSection extends StatelessWidget {
+  final String title;
+  final List<OverallBalance> entries;
+  final Color color;
+  final String emptyHint;
+
+  const _PersonListSection({
+    required this.title,
+    required this.entries,
+    required this.color,
+    required this.emptyHint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 11.sp,
+            fontWeight: FontWeight.w900,
+            color: AppColors.paper,
+            letterSpacing: 1.2,
+          ),
+        ),
+        12.verticalSpace,
+        if (entries.isEmpty)
+          EmptyHint(emptyHint)
+        else
+          ...entries.map((o) => _ExpandablePersonCard(entry: o, color: color)),
+      ],
+    );
+  }
+}
+
+class _ExpandablePersonCard extends StatefulWidget {
+  final OverallBalance entry;
+  final Color color;
+
+  const _ExpandablePersonCard({required this.entry, required this.color});
+
+  @override
+  State<_ExpandablePersonCard> createState() => _ExpandablePersonCardState();
+}
+
+class _ExpandablePersonCardState extends State<_ExpandablePersonCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: EdgeInsets.only(bottom: 12.h),
+        padding: EdgeInsets.all(14.w),
+        decoration: BoxDecoration(
+          color: AppColors.paper,
+          borderRadius: BorderRadius.circular(14.r),
+          boxShadow: _expanded
+              ? [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))]
+              : null,
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 20.r,
+                  backgroundColor: widget.color.withValues(alpha: 0.8),
+                  child: Text(
+                    widget.entry.name.isNotEmpty ? widget.entry.name[0].toUpperCase() : '?',
+                    style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                16.horizontalSpace,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.entry.name,
+                        style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w700, color: AppColors.ink),
+                      ),
+                      Text(
+                        'across ${widget.entry.groupCount} group${widget.entry.groupCount == 1 ? '' : 's'}',
+                        style: TextStyle(fontSize: 11.sp, color: AppColors.slate, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      fmtAed(widget.entry.amount.abs()),
+                      style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900, color: widget.color),
+                    ),
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 16.r,
+                      color: AppColors.slate,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (_expanded) ...[
+              Padding(
+                padding: EdgeInsets.only(top: 12.h),
+                child: const Divider(color: AppColors.line, height: 1),
+              ),
+              Padding(
+                padding: EdgeInsets.only(top: 8.h),
+                child: Column(
+                  children: widget.entry.breakdown.map((b) => Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4.h),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          b.groupName,
+                          style: TextStyle(fontSize: 12.sp, color: AppColors.slate, fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          fmtAed(b.amount.abs()),
+                          style: TextStyle(
+                            fontSize: 12.sp, 
+                            color: b.amount > 0 ? AppColors.sage : AppColors.rust,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )).toList(),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

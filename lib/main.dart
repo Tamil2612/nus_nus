@@ -1,7 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_gemma/core/api/flutter_gemma.dart';
-import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
+// import 'package:flutter_gemma/core/api/flutter_gemma.dart';
+// import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
@@ -17,11 +17,11 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  await FlutterGemma.initialize(
-    inferenceEngines: [
-      MediaPipeEngine(),
-    ],
-  );
+  // await FlutterGemma.initialize(
+  //   inferenceEngines: [
+  //     MediaPipeEngine(),
+  //   ],
+  // );
 
   runApp(const NusNusApp());
 }

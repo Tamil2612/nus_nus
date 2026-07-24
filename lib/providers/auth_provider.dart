@@ -12,7 +12,13 @@ class AuthProvider extends ChangeNotifier {
 
   AuthProvider() {
     _user = _auth.currentUser;
-    _auth.authStateChanges().listen((user) {
+    // userChanges() (not authStateChanges()) so that a profile-only
+    // update — like the displayName we set right after registering —
+    // refreshes [currentUser] too. authStateChanges() only fires on
+    // sign-in/sign-out and would leave displayName looking empty
+    // anywhere it's read (e.g. group ownership labels) until the next
+    // full sign-in.
+    _auth.userChanges().listen((user) {
       _user = user;
       notifyListeners();
     });
@@ -42,6 +48,13 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
       await credential.user?.updateDisplayName(name.trim());
+      // updateDisplayName() writes to the server but doesn't refresh the
+      // locally cached User object on its own — reload() pulls the fresh
+      // profile back down so `currentUser.displayName` is correct the
+      // moment this call returns, instead of staying blank until some
+      // unrelated later refresh.
+      await credential.user?.reload();
+      _user = _auth.currentUser;
 
       final uid = credential.user?.uid;
       if (uid != null) {

@@ -9,10 +9,16 @@ class ExpenseTile extends StatelessWidget {
   final Expense expense;
   final Person? payer;
   final String splitNames;
-  final VoidCallback onDelete;
+  /// Null for anyone viewing a group they didn't create — they can see
+  /// every expense but can't delete one.
+  final VoidCallback? onDelete;
   /// Settlement records shouldn't be edited in place (correct them by
   /// deleting and re-recording) — leave this null to disable tap-to-edit.
   final VoidCallback? onEdit;
+  /// e.g. "Added by Priya" — shown when someone other than the group's
+  /// creator logged this expense, so it's clear at a glance who added
+  /// what in a group with multiple contributors. Null hides the line.
+  final String? addedByLabel;
 
   const ExpenseTile({
     super.key,
@@ -21,6 +27,7 @@ class ExpenseTile extends StatelessWidget {
     required this.splitNames,
     required this.onDelete,
     this.onEdit,
+    this.addedByLabel,
   });
 
   @override
@@ -66,6 +73,17 @@ class ExpenseTile extends StatelessWidget {
                         : '${payer?.name ?? '—'} paid · split with $splitNames',
                     style: TextStyle(fontSize: 11.5.sp, color: AppColors.slate),
                   ),
+                  if (addedByLabel != null)
+                    Padding(
+                      padding: EdgeInsets.only(top: 2.h),
+                      child: Text(
+                        addedByLabel!,
+                        style: TextStyle(
+                            fontSize: 10.sp,
+                            color: AppColors.brass,
+                            fontStyle: FontStyle.italic),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -83,12 +101,13 @@ class ExpenseTile extends StatelessWidget {
                 splashRadius: 18.r,
                 tooltip: 'Edit',
               ),
-            IconButton(
-              icon: Icon(Icons.close, size: 16.w, color: AppColors.slate),
-              onPressed: onDelete,
-              splashRadius: 18.r,
-              tooltip: 'Delete',
-            ),
+            if (onDelete != null)
+              IconButton(
+                icon: Icon(Icons.close, size: 16.w, color: AppColors.slate),
+                onPressed: onDelete,
+                splashRadius: 18.r,
+                tooltip: 'Delete',
+              ),
           ],
         ),
       ),

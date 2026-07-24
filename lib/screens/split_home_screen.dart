@@ -6,6 +6,7 @@ import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/balances_tab.dart';
+import '../widgets/branded_loader.dart';
 import '../widgets/header_bar.dart';
 import '../widgets/ledger_tab.dart';
 import '../widgets/expense_form_sheet.dart';
@@ -15,8 +16,16 @@ import 'nus_ai_screen.dart';
 class SplitHomeScreen extends StatelessWidget {
   const SplitHomeScreen({super.key});
 
+  String _ownerNameFor(BuildContext context) {
+    final user = context.read<AuthProvider>().currentUser;
+    if (user == null) return 'Someone';
+    if (user.displayName?.isNotEmpty == true) return user.displayName!;
+    return user.email ?? 'Someone';
+  }
+
   void _showAddGroup(BuildContext context, SplitProvider provider) {
     final ctrl = TextEditingController();
+    final ownerName = _ownerNameFor(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -44,7 +53,7 @@ class SplitHomeScreen extends StatelessWidget {
           ElevatedButton(
             onPressed: () {
               if (ctrl.text.trim().isNotEmpty) {
-                provider.addGroup(ctrl.text);
+                provider.addGroup(ctrl.text, ownerName: ownerName);
                 Navigator.pop(ctx);
               }
             },
@@ -60,7 +69,7 @@ class SplitHomeScreen extends StatelessWidget {
   }
 
   Future<void> _confirmDeleteGroup(BuildContext context, SplitProvider provider,
-      int groupId, String name) async {
+      String groupId, String name) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -118,92 +127,7 @@ class SplitHomeScreen extends StatelessWidget {
     final totalSpent = provider.totalSpent;
 
     if (provider.isLoading) {
-      return const Scaffold(
-        body: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(-0.4, -0.6),
-              radius: 1.2,
-              colors: [AppColors.inkSoft, AppColors.ink],
-            ),
-          ),
-          child: Center(
-            child: CircularProgressIndicator(color: AppColors.brass),
-          ),
-        ),
-      );
-    }
-
-    if (currentGroup == null) {
-      return Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(-0.4, -0.6),
-              radius: 1.2,
-              colors: [AppColors.inkSoft, AppColors.ink],
-            ),
-          ),
-          child: Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32.w),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 96.r,
-                    height: 96.r,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.brass, width: 3),
-                    ),
-                    child: Icon(Icons.account_balance_wallet_outlined,
-                        size: 44.r, color: AppColors.brass),
-                  ),
-                  24.verticalSpace,
-                  RichText(
-                    text: TextSpan(
-                      style: TextStyle(
-                          fontSize: 28.sp,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.paper,
-                          fontFamily: 'Georgia'),
-                      children: [
-                        const TextSpan(text: 'Nus'),
-                        TextSpan(
-                            text: '·',
-                            style: TextStyle(color: AppColors.brass)),
-                        const TextSpan(text: 'Nus'),
-                      ],
-                    ),
-                  ),
-                  8.verticalSpace,
-                  Text(
-                    'Track shared expenses without the hassle.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.slate, fontSize: 14.sp),
-                  ),
-                  32.verticalSpace,
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _showAddGroup(context, provider),
-                      style: AppTheme.solidButton.copyWith(
-                        backgroundColor:
-                            WidgetStateProperty.all(AppColors.brass),
-                        padding: WidgetStateProperty.all(
-                            EdgeInsets.symmetric(vertical: 16.h)),
-                      ),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Create your first group'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+      return const BrandedLoader(message: 'Getting your groups ready…');
     }
 
     return Scaffold(
@@ -212,7 +136,7 @@ class SplitHomeScreen extends StatelessWidget {
         child: Column(
           children: [
             DrawerHeader(
-              decoration: const BoxDecoration(color: AppColors.ink),
+              decoration: const BoxDecoration(color: AppColors.paperDim),
               margin: EdgeInsets.zero,
               child: Center(
                 child: Column(
@@ -223,7 +147,7 @@ class SplitHomeScreen extends StatelessWidget {
                         style: TextStyle(
                             fontSize: 24.sp,
                             fontWeight: FontWeight.bold,
-                            color: AppColors.paper),
+                            color: AppColors.ink),
                         children: [
                           const TextSpan(text: 'Nus'),
                           TextSpan(
@@ -247,7 +171,7 @@ class SplitHomeScreen extends StatelessWidget {
                               ? user.displayName!
                               : (user.email ?? ''),
                           style: TextStyle(
-                              color: AppColors.brassSoft,
+                              color: AppColors.brass,
                               fontSize: 11.5.sp,
                               fontWeight: FontWeight.w600),
                         ),
@@ -258,42 +182,69 @@ class SplitHomeScreen extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  ...provider.groups.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final g = entry.value;
-                    final isSelected = currentGroup.id == g.id;
-                    return ListTile(
-                      leading: Icon(Icons.group,
-                          color:
-                              isSelected ? AppColors.brass : AppColors.slate),
-                      title: Text(
-                        g.name,
-                        style: TextStyle(
-                          color: AppColors.ink,
-                          fontWeight:
-                              isSelected ? FontWeight.bold : FontWeight.normal,
+              child: provider.groups.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24.w),
+                        child: Text(
+                          'No groups yet — create one below, or ask a '
+                          'friend to add you to theirs.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: AppColors.slate, fontSize: 12.5.sp),
                         ),
                       ),
-                      trailing: IconButton(
-                        icon: Icon(Icons.delete_outline,
-                            size: 20.r, color: AppColors.slate),
-                        onPressed: () => _confirmDeleteGroup(
-                            context, provider, g.id, g.name),
-                        tooltip: 'Delete group',
-                      ),
-                      selected: isSelected,
-                      selectedTileColor: AppColors.brass.withValues(alpha: 0.1),
-                      onTap: () {
-                        provider.selectGroup(idx);
-                        Navigator.pop(context);
-                      },
-                    );
-                  }),
-                ],
-              ),
+                    )
+                  : ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        ...provider.groups.map((g) {
+                          final owned = g.ownerId ==
+                              context.read<AuthProvider>().currentUser?.uid;
+                          final isSelected = currentGroup?.id == g.id;
+                          return ListTile(
+                            leading: Icon(
+                                owned ? Icons.group : Icons.group_outlined,
+                                color: isSelected
+                                    ? AppColors.brass
+                                    : AppColors.slate),
+                            title: Text(
+                              g.name,
+                              style: TextStyle(
+                                color: AppColors.ink,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: owned
+                                ? null
+                                : Text(
+                                    'Shared by ${g.ownerName.isEmpty ? 'a member' : g.ownerName}',
+                                    style: TextStyle(
+                                        color: AppColors.slate, fontSize: 10.5.sp),
+                                  ),
+                            trailing: owned
+                                ? IconButton(
+                                    icon: Icon(Icons.delete_outline,
+                                        size: 20.r, color: AppColors.slate),
+                                    onPressed: () => _confirmDeleteGroup(
+                                        context, provider, g.id, g.name),
+                                    tooltip: 'Delete group',
+                                  )
+                                : Icon(Icons.visibility_outlined,
+                                    size: 18.r, color: AppColors.slate),
+                            selected: isSelected,
+                            selectedTileColor:
+                                AppColors.brass.withValues(alpha: 0.1),
+                            onTap: () {
+                              provider.selectGroup(g.id);
+                              Navigator.pop(context);
+                            },
+                          );
+                        }),
+                      ],
+                    ),
             ),
             Padding(
               padding: const EdgeInsets.all(16),
@@ -349,104 +300,199 @@ class SplitHomeScreen extends StatelessWidget {
           ),
         ),
         child: SafeArea(
-          child: DefaultTabController(
-            length: 3,
-            child: Column(
-              children: [
-                HeaderBar(totalSpent: totalSpent),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.w),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(12.r),
-                    ),
-                    child: TabBar(
-                      labelColor: AppColors.ink,
-                      unselectedLabelColor: AppColors.slate,
-                      indicator: BoxDecoration(
-                        color: AppColors.brassSoft,
-                        borderRadius: BorderRadius.circular(10.r),
+          child: currentGroup == null
+              ? _EmptyGroupsBody(onCreateGroup: () => _showAddGroup(context, provider))
+              : DefaultTabController(
+                  length: 3,
+                  child: Column(
+                    children: [
+                      HeaderBar(totalSpent: totalSpent),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(12.r),
+                          ),
+                          child: TabBar(
+                            labelColor: AppColors.ink,
+                            unselectedLabelColor: AppColors.slate,
+                            indicator: BoxDecoration(
+                              color: AppColors.brassSoft,
+                              borderRadius: BorderRadius.circular(10.r),
+                            ),
+                            indicatorSize: TabBarIndicatorSize.tab,
+                            indicatorPadding: EdgeInsets.all(4.r),
+                            dividerColor: Colors.transparent,
+                            labelStyle: TextStyle(
+                                fontSize: 12.5.sp, fontWeight: FontWeight.bold),
+                            tabs: const [
+                              Tab(text: 'Activity'),
+                              Tab(text: 'Balances'),
+                              Tab(text: 'Overview'),
+                            ],
+                          ),
+                        ),
                       ),
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      indicatorPadding: EdgeInsets.all(4.r),
-                      dividerColor: Colors.transparent,
-                      labelStyle: TextStyle(
-                          fontSize: 12.5.sp, fontWeight: FontWeight.bold),
-                      tabs: const [
-                        Tab(text: 'Activity'),
-                        Tab(text: 'Balances'),
-                        Tab(text: 'Overview'),
-                      ],
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            LedgerTab(),
+                            BalancesTab(),
+                            OverviewTab(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ),
+      floatingActionButton: currentGroup == null
+          ? null
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                SizedBox(
+                  height: 45.h,
+                  child: FloatingActionButton.extended(
+                    heroTag: null,
+                    onPressed: () => _openNusAi(context),
+                    backgroundColor: AppColors.brass,
+                    foregroundColor: AppColors.ink,
+                    elevation: 4,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
+                    icon: Image.asset(
+                      'assets/icon/ai.png',
+                      width: 18.w,
+                      height: 18.w,
+                    ),
+                    label: Text(
+                      'Nus Ai',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.sp,
+                      ),
                     ),
                   ),
                 ),
-                8.verticalSpace,
-                const Expanded(
-                  child: TabBarView(
-                    children: [
-                      LedgerTab(),
-                      BalancesTab(),
-                      OverviewTab(),
-                    ],
+                12.verticalSpace,
+                SizedBox(
+                  height: 45.h,
+                  child: FloatingActionButton.extended(
+                    onPressed: () => _showAddExpenseSheet(context),
+                    heroTag: null,
+                    backgroundColor: AppColors.brass,
+                    foregroundColor: AppColors.ink,
+                    elevation: 4,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
+                    icon: Icon(Icons.add, size: 18.sp),
+                    label: Text(
+                      'Add Split',
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// Shown as the *body* of the normal Home scaffold (drawer, sign-out and
+/// all) when the signed-in user has no groups of their own and hasn't
+/// been linked into anyone else's yet — rather than a dead-end screen
+/// with only one button on it.
+class _EmptyGroupsBody extends StatelessWidget {
+  final VoidCallback onCreateGroup;
+  const _EmptyGroupsBody({required this.onCreateGroup});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(4.w, 12.h, 16.w, 0),
+          child: Row(
+            children: [
+              Builder(
+                builder: (context) => IconButton(
+                  icon: Icon(Icons.menu, color: AppColors.ink, size: 26.r),
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+            ],
           ),
         ),
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          SizedBox(
-            height: 45.h,
-            child: FloatingActionButton.extended(
-              heroTag: null,
-              onPressed: () => _openNusAi(context),
-              backgroundColor: AppColors.brass,
-              foregroundColor: AppColors.ink,
-              elevation: 4,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
-              icon: Image.asset(
-                'assets/icon/ai.png',
-                width: 18.w,
-                height: 18.w,
-              ),
-              label: Text(
-                'Nus Ai',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.sp,
-                ),
+        Expanded(
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32.w),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 96.r,
+                    height: 96.r,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.brass, width: 3),
+                    ),
+                    child: Icon(Icons.account_balance_wallet_outlined,
+                        size: 44.r, color: AppColors.brass),
+                  ),
+                  24.verticalSpace,
+                  RichText(
+                    text: TextSpan(
+                      style: TextStyle(
+                          fontSize: 28.sp,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.ink,
+                          fontFamily: 'Georgia'),
+                      children: [
+                        const TextSpan(text: 'Nus'),
+                        TextSpan(
+                            text: '·',
+                            style: TextStyle(color: AppColors.brass)),
+                        const TextSpan(text: 'Nus'),
+                      ],
+                    ),
+                  ),
+                  8.verticalSpace,
+                  Text(
+                    "You're all set. Create a group when you're ready — "
+                    "or if a friend adds you to theirs, it'll show up "
+                    'here automatically.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.slate, fontSize: 14.sp),
+                  ),
+                  32.verticalSpace,
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: onCreateGroup,
+                      style: AppTheme.solidButton.copyWith(
+                        backgroundColor:
+                            WidgetStateProperty.all(AppColors.brass),
+                        padding: WidgetStateProperty.all(
+                            EdgeInsets.symmetric(vertical: 16.h)),
+                      ),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create your first group'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          12.verticalSpace,
-          SizedBox(
-            height: 45.h,
-            child: FloatingActionButton.extended(
-              onPressed: () => _showAddExpenseSheet(context),
-              heroTag: null,
-              backgroundColor: AppColors.brass,
-              foregroundColor: AppColors.ink,
-              elevation: 4,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
-              icon: Icon(Icons.add, size: 18.sp),
-              label: Text(
-                'Add Split',
-                style: TextStyle(
-                  fontSize: 12.sp,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

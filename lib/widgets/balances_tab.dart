@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
-import '../models/pair_balance.dart';
 import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
@@ -11,15 +10,6 @@ import 'common_atoms.dart';
 
 class BalancesTab extends StatelessWidget {
   const BalancesTab({super.key});
-
-  /// People to show a balance row for: everyone active, plus anyone
-  /// archived who still has a non-zero balance outstanding.
-  List<Person> _visiblePeople(SplitProvider provider, Map<int, double> net) {
-    final active = provider.people;
-    final archivedWithBalance = provider.allPeople.where((p) =>
-        p.archived && (net[p.id] ?? 0).abs() > 0.005);
-    return [...active, ...archivedWithBalance];
-  }
 
   Future<void> _confirmSettle(
     BuildContext context,
@@ -75,242 +65,222 @@ class BalancesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
-    final net = provider.balances;
-    final people = _visiblePeople(provider, net);
-    final pairsToSettle = provider.pairBalances;
+    
+    // Calculate totals for summary card
+    double totalOwedByYou = 0;
+    double totalOwedToYou = 0;
+    
+    final pairs = provider.pairBalances;
+    // For this group specific summary:
+    // We need to find the Person ID linked to the current user in this group.
+    final currentGroup = provider.currentGroup;
+    final myPerson = currentGroup?.members.firstWhere((p) => p.linkedUserId == provider.uid, orElse: () => currentGroup.members.first);
+    final myId = myPerson?.id;
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(16.w),
-      child: Column(
-        children: [
-          // Net Balances Summary Card
-          _panel(
+    for (final pb in pairs) {
+      if (pb.debtorId == myId) totalOwedByYou += pb.owedAmount;
+      if (pb.creditorId == myId) totalOwedToYou += pb.owedAmount;
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(16.w),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SectionTitle(title: 'Net Balances'),
-                12.verticalSpace,
-                if (people.isEmpty)
-                  const EmptyHint('Add people to see balances.')
-                else
-                  ...people.map((p) {
-                    final v = net[p.id] ?? 0;
-                    final owed = v > 0.005;
-                    final owes = v < -0.005;
-                    final color = owed
-                        ? AppColors.sage
-                        : (owes ? AppColors.rust : AppColors.slate);
-                    final label =
-                        owed ? 'is owed' : (owes ? 'owes' : 'is settled');
-
-                    // The pairwise detail behind the net total — this is
-                    // what actually answers "owed by whom, specifically".
-                    final breakdown = owed
-                        ? provider.owedToPerson(p.id)
-                        : (owes
-                            ? provider.owedByPerson(p.id)
-                            : const <PairBalance>[]);
-
-                    return Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6.h),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 8.w,
-                                height: 8.w,
-                                decoration: BoxDecoration(
-                                    color: color, shape: BoxShape.circle),
-                              ),
-                              12.horizontalSpace,
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        p.name,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13.5.sp,
-                                            color: AppColors.ink),
-                                      ),
-                                    ),
-                                    if (p.archived) ...[
-                                      4.horizontalSpace,
-                                      Text('(left)',
-                                          style: TextStyle(
-                                              fontSize: 10.5.sp,
-                                              color: AppColors.slate,
-                                              fontStyle: FontStyle.italic)),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              Text(
-                                '$label ${fmtAed(v.abs())}',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13.5.sp,
-                                    color: color),
-                              ),
-                            ],
-                          ),
-                          if (breakdown.isNotEmpty)
-                            Padding(
-                              padding: EdgeInsets.only(left: 20.w, top: 4.h),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: breakdown.map((pb) {
-                                  final counterpartId = owed
-                                      ? pb.debtorId
-                                      : pb.creditorId;
-                                  final counterpart =
-                                      provider.personById(counterpartId!);
-                                  return Padding(
-                                    padding: EdgeInsets.only(bottom: 2.h),
-                                    child: Text(
-                                      '↳ ${counterpart?.name ?? '?'}  ${fmtAed(pb.owedAmount)}',
-                                      style: TextStyle(
-                                        fontSize: 11.5.sp,
-                                        color: AppColors.slate,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
+                // Summary Card (Image 1 style)
+                Container(
+                  padding: EdgeInsets.all(24.w),
+                  decoration: BoxDecoration(
+                    color: AppColors.paper,
+                    borderRadius: BorderRadius.circular(20.r),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 14, offset: const Offset(0, 6)),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Text(
+                              fmtAed(totalOwedByYou),
+                              style: TextStyle(fontSize: 22.sp, fontWeight: FontWeight.bold, color: AppColors.rust),
                             ),
-                        ],
-                      ),
-                    );
-                  }),
-              ],
-            ),
-          ),
-
-          16.verticalSpace,
-
-          // Actionable settle-up list
-          _panel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SectionTitle(title: 'Settle up'),
-                6.verticalSpace,
-                Text(
-                  'Every pair with an open balance — settle each one individually.',
-                  style: TextStyle(fontSize: 11.5.sp, color: AppColors.slate),
-                ),
-                14.verticalSpace,
-                if (pairsToSettle.isEmpty)
-                  Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12.h),
-                    child: Row(
-                      children: [
-                        Icon(Icons.celebration_outlined,
-                            color: AppColors.sage, size: 22.r),
-                        8.horizontalSpace,
-                        Text(
-                          'Everyone is square.',
-                          style: TextStyle(
-                              color: AppColors.sage,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13.5.sp),
+                            4.verticalSpace,
+                            Text('Owed by you', style: TextStyle(fontSize: 12.sp, color: AppColors.slate, fontWeight: FontWeight.w600)),
+                          ],
                         ),
-                      ],
-                    ),
-                  )
-                else
-                  ...pairsToSettle.map((pb) {
-                    final from = provider.personById(pb.debtorId!);
+                      ),
+                      Container(width: 1, height: 40.h, color: AppColors.line),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Text(
+                              fmtAed(totalOwedToYou),
+                              style: TextStyle(fontSize: 22.sp, fontWeight: FontWeight.bold, color: AppColors.sage),
+                            ),
+                            4.verticalSpace,
+                            Text('Owed to you', style: TextStyle(fontSize: 12.sp, color: AppColors.slate, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                24.verticalSpace,
+                
+                if (totalOwedByYou > 0) ...[
+                  Text('OWED BY YOU', style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w900, color: AppColors.paper, letterSpacing: 1.2)),
+                  12.verticalSpace,
+                  ...pairs.where((pb) => pb.debtorId == myId).map((pb) {
                     final to = provider.personById(pb.creditorId!);
-                    return Container(
-                      margin: EdgeInsets.only(bottom: 10.h),
-                      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
-                      decoration: BoxDecoration(
-                        color: AppColors.paperDim,
-                        borderRadius: BorderRadius.circular(10.r),
-                        border: Border.all(color: AppColors.line),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Wrap(
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Text(from?.name ?? '?',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13.sp,
-                                        color: AppColors.ink)),
-                                Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 6.w),
-                                  child: Icon(Icons.arrow_forward,
-                                      size: 14.r, color: AppColors.brass),
-                                ),
-                                Text(to?.name ?? '?',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13.sp,
-                                        color: AppColors.ink)),
-                                8.horizontalSpace,
-                                Text(fmtAed(pb.owedAmount),
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13.sp,
-                                        color: AppColors.slate)),
-                              ],
-                            ),
-                          ),
-                          8.horizontalSpace,
-                          ElevatedButton(
-                            onPressed: () => _confirmSettle(context, provider,
-                                pb.debtorId!, pb.creditorId!, pb.owedAmount),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.sage,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              padding:
-                                  EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8.r)),
-                              textStyle:
-                                  TextStyle(fontSize: 11.5.sp, fontWeight: FontWeight.w700),
-                            ),
-                            child: const Text('Settle'),
-                          ),
-                        ],
-                      ),
+                    return _BalanceTile(
+                      person: to!,
+                      amount: pb.owedAmount,
+                      subtitle: 'unpaid balance',
+                      isOwedByYou: true,
                     );
                   }),
+                  24.verticalSpace,
+                ],
+                
+                if (totalOwedToYou > 0) ...[
+                  Text('OWED TO YOU', style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w900, color: AppColors.paper, letterSpacing: 1.2)),
+                  12.verticalSpace,
+                  ...pairs.where((pb) => pb.creditorId == myId).map((pb) {
+                    final from = provider.personById(pb.debtorId!);
+                    return _BalanceTile(
+                      person: from!,
+                      amount: pb.owedAmount,
+                      subtitle: 'is due to pay you',
+                      isOwedByYou: false,
+                      onSettle: () => _confirmSettle(context, provider, pb.debtorId!, pb.creditorId!, pb.owedAmount),
+                    );
+                  }),
+                ],
+                
+                if (totalOwedByYou == 0 && totalOwedToYou == 0)
+                  Center(
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 60.h),
+                      child: Column(
+                        children: [
+                          Icon(Icons.check_circle_outline, color: AppColors.sage, size: 48.r),
+                          12.verticalSpace,
+                          EmptyHint('No active balances. Everything is settled!'),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
-          16.verticalSpace,
-        ],
-      ),
+        ),
+        
+        // Bottom Action Button
+        Padding(
+          padding: EdgeInsets.all(16.w),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                // Logic to find first pair to settle or show picker
+                if (pairs.isNotEmpty) {
+                  final pb = pairs.first;
+                  _confirmSettle(context, provider, pb.debtorId!, pb.creditorId!, pb.owedAmount);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.brass,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25.r)),
+                padding: EdgeInsets.symmetric(vertical: 14.h),
+              ),
+              child: Text('Settle all dues', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.sp)),
+            ),
+          ),
+        ),
+      ],
     );
   }
+}
 
-  Widget _panel({required Widget child}) {
+class _BalanceTile extends StatelessWidget {
+  final Person person;
+  final double amount;
+  final String subtitle;
+  final bool isOwedByYou;
+  final VoidCallback? onSettle;
+
+  const _BalanceTile({
+    required this.person,
+    required this.amount,
+    required this.subtitle,
+    required this.isOwedByYou,
+    this.onSettle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.all(20.w),
+      margin: EdgeInsets.only(bottom: 12.h),
+      padding: EdgeInsets.all(14.w),
       decoration: BoxDecoration(
         color: AppColors.paper,
         borderRadius: BorderRadius.circular(14.r),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20.r,
+            backgroundColor: person.color,
+            child: Text(
+              person.name[0].toUpperCase(),
+              style: TextStyle(fontSize: 14.sp, color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ),
+          16.horizontalSpace,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  person.name,
+                  style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w700, color: AppColors.ink),
+                ),
+                Text(
+                  subtitle, 
+                  style: TextStyle(fontSize: 11.sp, color: AppColors.slate, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                fmtAed(amount),
+                style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.ink),
+              ),
+              if (onSettle != null)
+                GestureDetector(
+                  onTap: onSettle,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 4.h),
+                    child: Text(
+                      'SETTLE →',
+                      style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.w900, color: AppColors.sage),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
-      child: child,
     );
   }
 }

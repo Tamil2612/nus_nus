@@ -24,24 +24,36 @@ class AppTheme {
     );
   }
 
-  static InputDecoration inputDecoration(String hint) {
+  static InputDecoration inputDecoration(String hint, {IconData? icon}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: AppColors.slate, fontSize: 13),
+      prefixIcon: icon != null
+          ? Icon(icon, size: 19, color: AppColors.slate)
+          : null,
       filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      fillColor: AppColors.paperDim,
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppColors.line),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppColors.line),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: AppColors.ink, width: 1.4),
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.brass, width: 1.6),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.rust, width: 1.2),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.rust, width: 1.6),
       ),
     );
   }
@@ -50,9 +62,10 @@ class AppTheme {
     return ElevatedButton.styleFrom(
       backgroundColor: AppColors.ink,
       foregroundColor: AppColors.paper,
+      disabledBackgroundColor: AppColors.ink.withOpacity(0.6),
       elevation: 0,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
     );
   }

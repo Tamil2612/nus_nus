@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/firestore_repository.dart';
+import '../data/member_directory_repository.dart';
 import '../models/expense.dart';
 import '../models/ledger_entry.dart';
 import '../models/pair_balance.dart';
@@ -11,25 +13,54 @@ import '../utils/settlement_calculator.dart';
 import '../utils/currency_formatter.dart';
 
 class SplitProvider extends ChangeNotifier {
-  final List<Group> _groups = [];
-  int _currentGroupIndex = -1;
-  int _nextId = 1;
+  /// Metadata (name/members/ownership) for every group visible to the
+  /// signed-in user, as last received from [FirestoreRepository.
+  /// watchGroupsForUser] — expenses are *not* included here, they're
+  /// merged in from [_expensesByGroup] before being exposed as [groups].
+  List<Group> _groupMeta = [];
+
+  /// Live expenses per group id, kept in sync by one subscription per
+  /// visible group (see [_syncExpenseSubscriptions]).
+  final Map<String, List<Expense>> _expensesByGroup = {};
+  final Map<String, StreamSubscription<List<Expense>>> _expenseSubs = {};
+
+  List<Group> _groups = [];
+  String? _currentGroupId;
   bool _isLoading = true;
   String? _uid;
 
+  /// The signed-in user's own registered display name, resolved from the
+  /// member directory (the authoritative source — see [setUserId]) rather
+  /// than trusted from FirebaseAuth's often-stale cached profile. Used as
+  /// `ownerName` when creating a group and to auto-add the creator as a
+  /// participant.
+  String? _myDisplayName;
+
+  StreamSubscription<List<Group>>? _groupsSub;
+
+  String? get uid => _uid;
   bool get isLoading => _isLoading;
 
-  /// Called by [AuthGate] whenever the signed-in user changes. Loads that
-  /// user's data from Firestore, or clears everything back to a blank
-  /// slate when [uid] is null (signed out).
+  /// Called by [AuthGate] whenever the signed-in user changes. Subscribes
+  /// to every group that user can see (owned or linked-into) in real
+  /// time, or clears everything back to a blank slate when [uid] is null
+  /// (signed out).
   Future<void> setUserId(String? uid) async {
     if (_uid == uid) return;
     _uid = uid;
+    await _groupsSub?.cancel();
+    _groupsSub = null;
+    for (final sub in _expenseSubs.values) {
+      await sub.cancel();
+    }
+    _expenseSubs.clear();
+    _expensesByGroup.clear();
+    _myDisplayName = null;
 
     if (uid == null) {
-      _groups.clear();
-      _currentGroupIndex = -1;
-      _nextId = 1;
+      _groupMeta = [];
+      _groups = [];
+      _currentGroupId = null;
       _isLoading = false;
       notifyListeners();
       return;
@@ -37,95 +68,202 @@ class SplitProvider extends ChangeNotifier {
 
     _isLoading = true;
     notifyListeners();
-    await _loadFromCloud(uid);
+
+    // Resolve the signed-in user's authoritative display name in the
+    // background — the member directory (`users/{uid}`) is always correct
+    // since it's written directly from the name typed at registration,
+    // unlike FirebaseAuth's cached profile which can lag behind.
+    MemberDirectoryRepository.instance.fetchByUid(uid).then((profile) {
+      if (_uid != uid || profile == null || profile.name.isEmpty) return;
+      _myDisplayName = profile.name;
+    });
+
+    _groupsSub = FirestoreRepository.instance.watchGroupsForUser(uid).listen(
+      (loaded) => _onGroupMetaUpdated(loaded),
+      onError: (_) {
+        // Don't leave the user staring at a spinner forever if the
+        // stream errors out (e.g. offline, permission issue) — fall back
+        // to an empty, editable-nothing state so the UI can recover.
+        _groupMeta = [];
+        _rebuildGroups();
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
   }
 
-  Future<void> _loadFromCloud(String uid) async {
-    final loaded = await FirestoreRepository.instance.loadAll(uid);
-    _groups
-      ..clear()
-      ..addAll(loaded);
-
-    int maxId = 0;
-    for (final g in _groups) {
-      if (g.id > maxId) maxId = g.id;
-      for (final p in g.members) {
-        if (p.id > maxId) maxId = p.id;
-      }
-      for (final e in g.expenses) {
-        if (e.id > maxId) maxId = e.id;
-      }
-    }
-    _nextId = maxId + 1;
-    _currentGroupIndex = _groups.isNotEmpty ? 0 : -1;
+  void _onGroupMetaUpdated(List<Group> loaded) {
+    _groupMeta = loaded;
+    _syncExpenseSubscriptions(loaded.map((g) => g.id).toSet());
+    _rebuildGroups();
     _isLoading = false;
     notifyListeners();
   }
 
-  /// Fire-and-forget persistence: the in-memory state is already the
-  /// source of truth for the UI (notifyListeners happens synchronously in
-  /// every mutator), this just mirrors it to Firestore in the background.
-  void _persist() {
-    final uid = _uid;
-    if (uid == null) return; // not signed in yet — nothing to save to
-    FirestoreRepository.instance.saveAll(uid, _groups);
+  /// Starts an expenses subscription for every newly-visible group and
+  /// cancels the ones for groups that disappeared (deleted, or the
+  /// signed-in user was removed from them).
+  void _syncExpenseSubscriptions(Set<String> visibleGroupIds) {
+    for (final groupId in visibleGroupIds) {
+      if (_expenseSubs.containsKey(groupId)) continue;
+      _expenseSubs[groupId] = FirestoreRepository.instance
+          .watchExpenses(groupId)
+          .listen((expenses) {
+        _expensesByGroup[groupId] = expenses;
+        _rebuildGroups();
+        notifyListeners();
+      }, onError: (e) {
+        debugPrint('SplitProvider: Expense stream error for $groupId: $e');
+        // If the stream fails (e.g. permission lag for a newly added member),
+        // clear the stale subscription so we can try again.
+        _expenseSubs.remove(groupId)?.cancel();
+        _expensesByGroup.remove(groupId);
+        _rebuildGroups();
+        notifyListeners();
+
+        // Proactive retry after a short delay to account for Firestore
+        // permission propagation lag.
+        Future.delayed(const Duration(seconds: 2), () {
+          if (_uid != null && _groupMeta.any((g) => g.id == groupId)) {
+            _syncExpenseSubscriptions(_groupMeta.map((g) => g.id).toSet());
+          }
+        });
+      });
+    }
+
+    final stale = _expenseSubs.keys
+        .where((id) => !visibleGroupIds.contains(id))
+        .toList();
+    for (final id in stale) {
+      _expenseSubs.remove(id)?.cancel();
+      _expensesByGroup.remove(id);
+    }
+  }
+
+  /// Recombines the latest group metadata with whatever expenses are
+  /// cached for each group, keeping the current selection stable where
+  /// possible.
+  void _rebuildGroups() {
+    final merged = _groupMeta
+        .map((g) => g.copyWith(expenses: _expensesByGroup[g.id] ?? const []))
+        .toList();
+
+    merged.sort((a, b) {
+      final aOwned = a.ownerId == _uid;
+      final bOwned = b.ownerId == _uid;
+      if (aOwned != bOwned) return aOwned ? -1 : 1; // owned groups first
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    _groups = merged;
+
+    // Keep the current selection if it still exists; otherwise fall back
+    // to the first owned group, then the first linked group, then empty.
+    if (_currentGroupId == null ||
+        !_groups.any((g) => g.id == _currentGroupId)) {
+      _currentGroupId = _groups.isNotEmpty ? _groups.first.id : null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _groupsSub?.cancel();
+    for (final sub in _expenseSubs.values) {
+      sub.cancel();
+    }
+    super.dispose();
   }
 
   List<Group> get groups => List.unmodifiable(_groups);
+  List<Group> get ownedGroups =>
+      _groups.where((g) => g.ownerId == _uid).toList();
+  List<Group> get linkedGroups =>
+      _groups.where((g) => g.ownerId != _uid).toList();
 
-  Group? get currentGroup =>
-      _currentGroupIndex >= 0 && _currentGroupIndex < _groups.length
-          ? _groups[_currentGroupIndex]
-          : null;
+  Group? get currentGroup {
+    if (_currentGroupId == null) return null;
+    for (final g in _groups) {
+      if (g.id == _currentGroupId) return g;
+    }
+    return null;
+  }
 
-  void selectGroup(int index) {
-    if (index >= 0 && index < _groups.length) {
-      _currentGroupIndex = index;
+  /// Whether the signed-in user created the currently open group. The
+  /// creator is the only one who can rename/delete the group, manage its
+  /// member list, edit or delete an expense, or settle a balance up.
+  bool get isCurrentGroupOwner =>
+      currentGroup != null && currentGroup!.ownerId == _uid;
+
+  void selectGroup(String groupId) {
+    if (_groups.any((g) => g.id == groupId)) {
+      _currentGroupId = groupId;
       notifyListeners();
     }
   }
 
-  void addGroup(String name) {
-    final group = Group(
-      id: _nextId++,
-      name: name.trim().isEmpty ? 'New Group' : name.trim(),
-      members: [],
-      expenses: [],
+  void addGroup(String name, {String? ownerName}) {
+    final uid = _uid;
+    if (uid == null) return;
+    // Prefer the authoritative name resolved from the member directory —
+    // it's always correct. The caller-supplied [ownerName] (typically
+    // read straight off FirebaseAuth, which can lag behind) is only used
+    // as a stand-in for the rare case the directory lookup hasn't
+    // resolved yet.
+    final resolvedOwnerName = (_myDisplayName != null && _myDisplayName!.isNotEmpty)
+        ? _myDisplayName!
+        : (ownerName ?? '');
+
+    // Splitwise-style default: the creator is a participant in their own
+    // group from the start, not just an admin looking in from outside —
+    // otherwise they'd have to manually add themselves before they could
+    // be included in any expense.
+    final me = Person(
+      id: 1,
+      name: resolvedOwnerName.isEmpty ? 'You' : resolvedOwnerName,
+      color: AppColors.avatarColorFor(0),
+      linkedUserId: uid,
     );
-    _groups.add(group);
-    // Always jump to the group that was just created, not only the first one.
-    _currentGroupIndex = _groups.length - 1;
+
+    final group = Group(
+      id: FirestoreRepository.instance.newGroupId(),
+      name: name.trim().isEmpty ? 'New Group' : name.trim(),
+      ownerId: uid,
+      ownerName: resolvedOwnerName,
+      members: [me],
+      expenses: const [],
+    );
+    _groupMeta = [..._groupMeta, group];
+    _rebuildGroups();
+    _currentGroupId = group.id;
     notifyListeners();
-    _persist();
+    FirestoreRepository.instance.saveGroupMeta(group);
   }
 
-  /// Deletes a group entirely (including its people/expenses). If the
-  /// deleted group was the one currently open, falls back to the most
-  /// recent remaining group, or the empty state if none are left.
-  void removeGroup(int groupId) {
-    final removingCurrent = currentGroup?.id == groupId;
-    final removedIndex = _groups.indexWhere((g) => g.id == groupId);
-    if (removedIndex == -1) return;
+  /// Deletes a group entirely (including its people/expenses). Only the
+  /// creator can do this. If the deleted group was the one currently
+  /// open, falls back to another visible group, or the empty state if
+  /// none are left.
+  void removeGroup(String groupId) {
+    final idx = _groupMeta.indexWhere((g) => g.id == groupId);
+    if (idx == -1) return;
+    if (_groupMeta[idx].ownerId != _uid) return; // not the creator
 
-    _groups.removeAt(removedIndex);
-
-    if (_groups.isEmpty) {
-      _currentGroupIndex = -1;
-    } else if (removingCurrent) {
-      _currentGroupIndex = (removedIndex - 1).clamp(0, _groups.length - 1);
-    } else if (removedIndex < _currentGroupIndex) {
-      _currentGroupIndex -= 1;
-    }
+    _groupMeta = [..._groupMeta]..removeAt(idx);
+    _rebuildGroups();
     notifyListeners();
-    _persist();
+    FirestoreRepository.instance.deleteGroup(groupId);
   }
 
-  void renameGroup(int groupId, String newName) {
-    final idx = _groups.indexWhere((g) => g.id == groupId);
+  void renameGroup(String groupId, String newName) {
+    final idx = _groupMeta.indexWhere((g) => g.id == groupId);
     if (idx == -1 || newName.trim().isEmpty) return;
-    _groups[idx] = _groups[idx].copyWith(name: newName.trim());
+    if (_groupMeta[idx].ownerId != _uid) return; // not the creator
+    final updated = _groupMeta[idx].copyWith(name: newName.trim());
+    _groupMeta = [..._groupMeta];
+    _groupMeta[idx] = updated;
+    _rebuildGroups();
     notifyListeners();
-    _persist();
+    FirestoreRepository.instance.saveGroupMeta(updated);
   }
 
   // Getters for current group data --------------------------------------
@@ -152,8 +290,34 @@ class SplitProvider extends ChangeNotifier {
     return null;
   }
 
+  /// Finds the member of the current group whose registered account is
+  /// [uid], if any — used to show "Added by X" against an expense from
+  /// its `addedBy` uid without an extra Firestore lookup, since whoever
+  /// added an expense must already be a member of the group.
+  Person? personByUid(String? uid) {
+    if (uid == null) return null;
+    for (final p in allPeople) {
+      if (p.linkedUserId == uid) return p;
+    }
+    return null;
+  }
+
+  /// Smallest id not already used by a member of [group] — person ids
+  /// only need to be unique within a single group.
+  int _nextPersonId(Group group) {
+    int maxId = 0;
+    for (final p in group.members) {
+      if (p.id > maxId) maxId = p.id;
+    }
+    return maxId + 1;
+  }
+
+  int get _currentGroupMetaIndex =>
+      _groupMeta.indexWhere((g) => g.id == _currentGroupId);
+
   void addPerson(String name, {String? linkedUserId}) {
-    if (currentGroup == null) return;
+    final group = currentGroup;
+    if (group == null || group.ownerId != _uid) return;
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
 
@@ -163,23 +327,21 @@ class SplitProvider extends ChangeNotifier {
     }
 
     final newPerson = Person(
-      id: _nextId++,
+      id: _nextPersonId(group),
       name: trimmed,
       color: AppColors.avatarColorFor(allPeople.length),
       linkedUserId: linkedUserId,
     );
 
     final updatedMembers = [...allPeople, newPerson];
-    _groups[_currentGroupIndex] =
-        currentGroup!.copyWith(members: updatedMembers);
-    notifyListeners();
-    _persist();
+    _updateGroupMeta(group.copyWith(members: updatedMembers));
   }
 
   /// Returns true if the person was soft-deleted (had history) rather than
   /// fully removed, so the caller can tell the user what happened.
   bool removePerson(int id) {
-    if (currentGroup == null) return false;
+    final group = currentGroup;
+    if (group == null || group.ownerId != _uid) return false;
 
     final hasHistory = expenses.any(
       (e) => e.payerId == id || e.splitMap.containsKey(id),
@@ -190,11 +352,19 @@ class SplitProvider extends ChangeNotifier {
       return hasHistory ? p.copyWith(archived: true) : p;
     }).where((p) => hasHistory ? true : p.id != id).toList();
 
-    _groups[_currentGroupIndex] =
-        currentGroup!.copyWith(members: updatedMembers);
-    notifyListeners();
-    _persist();
+    _updateGroupMeta(group.copyWith(members: updatedMembers));
     return hasHistory;
+  }
+
+  /// Applies a metadata-only change (name/members) to the current group:
+  /// updates local state, rebuilds, notifies, and persists — the shared
+  /// tail end of every member-list mutator above.
+  void _updateGroupMeta(Group updated) {
+    _groupMeta = [..._groupMeta];
+    _groupMeta[_currentGroupMetaIndex] = updated;
+    _rebuildGroups();
+    notifyListeners();
+    FirestoreRepository.instance.saveGroupMeta(updated);
   }
 
   /// Returns a `Map<int, double>` split map on success, or a `String` error
@@ -232,7 +402,11 @@ class SplitProvider extends ChangeNotifier {
     return map;
   }
 
-  /// Returns null on success, or an error message.
+  /// Returns null on success, or an error message. Any member of the
+  /// group can log a new expense — not just the creator — the same way
+  /// Splitwise lets any participant add one. Editing or deleting an
+  /// existing expense is still creator-only; see [editExpense] and
+  /// [removeExpense].
   String? addExpense({
     required String desc,
     required double? amount,
@@ -241,7 +415,11 @@ class SplitProvider extends ChangeNotifier {
     Map<int, double>? customSplits,
     bool isSettlement = false,
   }) {
-    if (currentGroup == null) return 'Select a group first.';
+    final group = currentGroup;
+    if (group == null) return 'Select a group first.';
+    if (!group.memberUids.contains(_uid)) {
+      return "You're not a member of this group.";
+    }
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
     if (payerId == null) return 'Add at least one person first.';
     if (splitWith.isEmpty) return 'Pick who this should be split between.';
@@ -255,7 +433,7 @@ class SplitProvider extends ChangeNotifier {
     final finalSplitMap = splitResult as Map<int, double>;
 
     final newExpense = Expense(
-      id: _nextId++,
+      id: FirestoreRepository.instance.newExpenseId(group.id),
       desc: desc.trim().isEmpty
           ? (isSettlement ? 'Settlement' : 'Untitled expense')
           : desc.trim(),
@@ -263,25 +441,37 @@ class SplitProvider extends ChangeNotifier {
       payerId: payerId,
       splitMap: finalSplitMap,
       isSettlement: isSettlement,
+      addedBy: _uid,
     );
 
-    final updatedExpenses = [...expenses, newExpense];
-    _groups[_currentGroupIndex] =
-        currentGroup!.copyWith(expenses: updatedExpenses);
+    _expensesByGroup[group.id] = [...expenses, newExpense];
+    _rebuildGroups();
     notifyListeners();
-    _persist();
+    FirestoreRepository.instance.createExpense(group.id, newExpense);
     return null;
   }
 
   /// Records that [fromId] paid [toId] [amount] to settle up. This is the
-  /// action behind the "Settle up" buttons in the Balances tab.
+  /// action behind the "Settle up" buttons in the Balances tab — only
+  /// available to the group's creator; everyone else can see the amount
+  /// but not clear it themselves.
   String? settleUp(int fromId, int toId, double amount) {
-    if (currentGroup == null) return 'Select a group first.';
+    final group = currentGroup;
+    if (group == null) return 'Select a group first.';
 
     final fromPerson = personById(fromId);
     final toPerson = personById(toId);
     if (fromPerson == null || toPerson == null) {
       return 'Could not find one of the people in this settlement.';
+    }
+
+    // Permission check: only the group owner OR the person being paid (creditor) 
+    // can officially record this settlement.
+    final isOwner = group.ownerId == _uid;
+    final isCreditor = toPerson.linkedUserId == _uid;
+
+    if (!isOwner && !isCreditor) {
+      return 'Only ${toPerson.name} or the group creator can settle this up.';
     }
 
     return addExpense(
@@ -293,24 +483,34 @@ class SplitProvider extends ChangeNotifier {
     );
   }
 
-  void removeExpense(int id) {
-    if (currentGroup == null) return;
-    final updatedExpenses = expenses.where((e) => e.id != id).toList();
-    _groups[_currentGroupIndex] =
-        currentGroup!.copyWith(expenses: updatedExpenses);
+  /// Creator-only: deleting an expense someone else logged (or your own)
+  /// is a destructive action, so it's kept restricted to whoever owns the
+  /// group rather than opened up to every member.
+  void removeExpense(String id) {
+    final group = currentGroup;
+    if (group == null || group.ownerId != _uid) return;
+    _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
+    _rebuildGroups();
     notifyListeners();
-    _persist();
+    FirestoreRepository.instance.deleteExpense(group.id, id);
   }
 
+  /// Creator-only, including for expenses someone else added — see the
+  /// class-level note on [removeExpense] for why editing stays this
+  /// restrictive even though adding doesn't.
   String? editExpense({
-    required int id,
+    required String id,
     required String desc,
     required double? amount,
     required int? payerId,
     required Set<int> splitWith,
     Map<int, double>? customSplits,
   }) {
-    if (currentGroup == null) return 'Select a group first.';
+    final group = currentGroup;
+    if (group == null) return 'Select a group first.';
+    if (group.ownerId != _uid) {
+      return 'Only ${group.ownerName.isEmpty ? 'the group creator' : group.ownerName} can edit this.';
+    }
     final existingIndex = expenses.indexWhere((e) => e.id == id);
     if (existingIndex == -1) return 'That expense no longer exists.';
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
@@ -325,7 +525,7 @@ class SplitProvider extends ChangeNotifier {
     if (finalSplitMap is String) return finalSplitMap; // error message
 
     final original = expenses[existingIndex];
-    final updated = original.copyWith(
+    final updatedExpense = original.copyWith(
       desc: desc.trim().isEmpty ? original.desc : desc.trim(),
       amount: amount,
       payerId: payerId,
@@ -333,11 +533,11 @@ class SplitProvider extends ChangeNotifier {
     );
 
     final updatedExpenses = [...expenses];
-    updatedExpenses[existingIndex] = updated;
-    _groups[_currentGroupIndex] =
-        currentGroup!.copyWith(expenses: updatedExpenses);
+    updatedExpenses[existingIndex] = updatedExpense;
+    _expensesByGroup[group.id] = updatedExpenses;
+    _rebuildGroups();
     notifyListeners();
-    _persist();
+    FirestoreRepository.instance.updateExpense(group.id, updatedExpense);
     return null;
   }
 
@@ -378,29 +578,65 @@ class SplitProvider extends ChangeNotifier {
 
   // -- Cross-group overview ------------------------------------------------
 
-  /// Aggregates every person's net balance across *all* groups, matched by
-  /// name (there's no global "contact" identity — a person is scoped to a
-  /// group — so two people named "Sara" in different groups are treated as
-  /// the same person here). Returns entries sorted by the size of the
-  /// balance, largest first.
-  List<OverallBalance> get overallBalancesByName {
+  /// The signed-in user's *own* balance with each other person, combined
+  /// across every group they're a participant in (owned or linked-into).
+  /// Unlike a naive "everyone's balance in every group" aggregate, this
+  /// only ever includes pairs that involve the signed-in user, so what's
+  /// shown is exactly "who owes me" and "who I owe" — nothing about how
+  /// other members stand with each other.
+  ///
+  /// A person is matched across groups by their registered uid when
+  /// available, falling back to a case-insensitive name match for people
+  /// who were only ever added as a free-text label (no shared identity
+  /// otherwise exists for those).
+  List<OverallBalance> myBalancesByPerson() {
+    final uid = _uid;
+    if (uid == null) return [];
+
     final totals = <String, double>{};
     final displayNames = <String, String>{};
     final groupCounts = <String, int>{};
+    final breakdowns = <String, List<GroupContribution>>{};
 
     for (final g in _groups) {
-      final net = SettlementCalculator.computeBalances(
-        personIds: g.members.map((p) => p.id).toList(),
-        expenses: g.expenses,
+      final mine = g.members.where((p) => p.linkedUserId == uid).toList();
+      if (mine.isEmpty) continue; // not a participant in this group
+      final myId = mine.first.id;
+
+      final pairs = SettlementCalculator.computePairBalances(
+        SettlementCalculator.deriveLedgerEntries(g.expenses),
       );
+
       final seenInThisGroup = <String>{};
-      for (final p in g.members) {
-        final key = p.name.trim().toLowerCase();
-        if (key.isEmpty) continue;
-        totals[key] = (totals[key] ?? 0) + (net[p.id] ?? 0);
-        displayNames.putIfAbsent(key, () => p.name.trim());
+      for (final pb in pairs) {
+        if (pb.personAId != myId && pb.personBId != myId) continue;
+        final counterpartId =
+            pb.personAId == myId ? pb.personBId : pb.personAId;
+        Person? counterpart;
+        for (final p in g.members) {
+          if (p.id == counterpartId) {
+            counterpart = p;
+            break;
+          }
+        }
+        if (counterpart == null) continue;
+
+        // PairBalance convention: amount > 0 means personA owes personB.
+        // Flip to "from my perspective": positive = they owe me.
+        final signedFromMe = pb.personAId == myId ? -pb.amount : pb.amount;
+
+        final key = counterpart.linkedUserId ??
+            'name:${counterpart.name.trim().toLowerCase()}';
+        totals[key] = (totals[key] ?? 0) + signedFromMe;
+        displayNames.putIfAbsent(key, () => counterpart!.name.trim());
         if (seenInThisGroup.add(key)) {
           groupCounts[key] = (groupCounts[key] ?? 0) + 1;
+        }
+
+        if (signedFromMe.abs() > 0.005) {
+          breakdowns.putIfAbsent(key, () => []).add(
+                GroupContribution(g.name, signedFromMe),
+              );
         }
       }
     }
@@ -410,6 +646,7 @@ class SplitProvider extends ChangeNotifier {
               name: displayNames[e.key] ?? e.key,
               amount: e.value,
               groupCount: groupCounts[e.key] ?? 0,
+              breakdown: breakdowns[e.key] ?? [],
             ))
         .toList();
     result.sort((a, b) => b.amount.abs().compareTo(a.amount.abs()));
@@ -417,15 +654,24 @@ class SplitProvider extends ChangeNotifier {
   }
 }
 
-/// A person's net balance summed across every group they appear in.
+class GroupContribution {
+  final String groupName;
+  final double amount;
+  GroupContribution(this.groupName, this.amount);
+}
+
+/// One other person's net balance against the signed-in user, summed
+/// across every group they share.
 class OverallBalance {
   final String name;
-  final double amount; // positive = owed overall, negative = owes overall
+  final double amount; // positive = they owe you, negative = you owe them
   final int groupCount;
+  final List<GroupContribution> breakdown;
 
   OverallBalance({
     required this.name,
     required this.amount,
     required this.groupCount,
+    this.breakdown = const [],
   });
 }

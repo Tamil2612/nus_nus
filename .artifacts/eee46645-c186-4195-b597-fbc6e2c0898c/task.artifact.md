@@ -1,0 +1,4 @@
+- [x] Update `SplitProvider` with detailed cross-group balance data
+- [x] Restore three-tab layout in `SplitHomeScreen`
+- [x] Redesign `OverviewTab` with Nus·Nus theme and expandable breakdowns
+- [x] Verify functionality

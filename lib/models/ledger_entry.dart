@@ -8,7 +8,7 @@
 /// ledger entries that net out against earlier ones when balances are
 /// computed, rather than mutating history.
 class LedgerEntry {
-  final int expenseId;
+  final String expenseId;
   final int fromId; // debtor
   final int toId; // creditor
   final double amount; // positive = new debt, negative = debt repayment

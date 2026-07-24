@@ -5,7 +5,9 @@ import '../theme/app_colors.dart';
 
 class PersonChip extends StatelessWidget {
   final Person person;
-  final VoidCallback onRemove;
+  /// Null for anyone viewing a group they didn't create — they can see
+  /// the roster but can't remove people from it.
+  final VoidCallback? onRemove;
 
   const PersonChip({super.key, required this.person, required this.onRemove});
 
@@ -40,13 +42,14 @@ class PersonChip extends StatelessWidget {
             4.horizontalSpace,
             Icon(Icons.verified, size: 13.r, color: AppColors.brass),
           ],
-          GestureDetector(
-            onTap: onRemove,
-            child:  Padding(
-              padding: EdgeInsets.only(left: 4.w),
-              child: Icon(Icons.close, size: 14.w, color: AppColors.slate),
+          if (onRemove != null)
+            GestureDetector(
+              onTap: onRemove,
+              child: Padding(
+                padding: EdgeInsets.only(left: 4.w),
+                child: Icon(Icons.close, size: 14.w, color: AppColors.slate),
+              ),
             ),
-          ),
         ],
       ),
     );

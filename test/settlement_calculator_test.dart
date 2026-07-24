@@ -8,7 +8,7 @@ void main() {
       // Person ids: 1 = Amina, 2 = Sara, 3 = Zayed
       final expenses = [
         Expense(
-          id: 1,
+          id: "1",
           desc: 'Dinner',
           amount: 90,
           payerId: 1,

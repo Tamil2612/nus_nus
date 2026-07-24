@@ -14,19 +14,24 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _passwordFocus = FocusNode();
   bool _obscure = true;
 
   @override
   void dispose() {
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
   Future<void> _submit(AuthProvider auth) async {
     FocusScope.of(context).unfocus();
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
     final error = await auth.signIn(
       email: _emailCtrl.text,
       password: _passwordCtrl.text,
@@ -37,6 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
           content: Text(error),
           backgroundColor: AppColors.rust,
           behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
     }
@@ -59,109 +65,155 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Center(
             child: SingleChildScrollView(
               padding: EdgeInsets.symmetric(horizontal: 28.w, vertical: 24.h),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  RichText(
-                    text: TextSpan(
-                      style: TextStyle(
-                          fontSize: 34.sp,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.paper,
-                          fontFamily: 'Georgia'),
-                      children: [
-                        const TextSpan(text: 'Nus'),
-                        TextSpan(text: '·', style: TextStyle(color: AppColors.brass)),
-                        const TextSpan(text: 'Nus'),
-                      ],
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 76.r,
+                      height: 76.r,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.brass, width: 2.4),
+                      ),
+                      child: Icon(Icons.receipt_long_rounded,
+                          size: 34.r, color: AppColors.brass),
                     ),
-                  ),
-                  8.verticalSpace,
-                  Text(
-                    'Sign in to split the tab.',
-                    style: TextStyle(color: AppColors.slate, fontSize: 13.5.sp),
-                  ),
-                  32.verticalSpace,
-                  Container(
-                    padding: EdgeInsets.all(20.w),
-                    decoration: BoxDecoration(
-                      color: AppColors.paper,
-                      borderRadius: BorderRadius.circular(16.r),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 16,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        TextField(
-                          controller: _emailCtrl,
-                          keyboardType: TextInputType.emailAddress,
-                          style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
-                          decoration: AppTheme.inputDecoration('Email'),
-                        ),
-                        12.verticalSpace,
-                        TextField(
-                          controller: _passwordCtrl,
-                          obscureText: _obscure,
-                          style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
-                          decoration: AppTheme.inputDecoration('Password').copyWith(
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscure ? Icons.visibility_off : Icons.visibility,
-                                size: 18.r,
-                                color: AppColors.slate,
-                              ),
-                              onPressed: () => setState(() => _obscure = !_obscure),
-                            ),
-                          ),
-                          onSubmitted: (_) => _submit(auth),
-                        ),
-                        20.verticalSpace,
-                        SizedBox(
-                          width: double.infinity,
-                          height: 48.h,
-                          child: ElevatedButton(
-                            onPressed: auth.isBusy ? null : () => _submit(auth),
-                            style: AppTheme.solidButton,
-                            child: auth.isBusy
-                                ? SizedBox(
-                                    width: 20.r,
-                                    height: 20.r,
-                                    child: const CircularProgressIndicator(
-                                        color: AppColors.paper, strokeWidth: 2),
-                                  )
-                                : Text('Sign in', style: TextStyle(fontSize: 14.sp)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  20.verticalSpace,
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                      );
-                    },
-                    child: RichText(
+                    18.verticalSpace,
+                    RichText(
                       text: TextSpan(
-                        style: TextStyle(color: AppColors.slate, fontSize: 13.sp),
+                        style: TextStyle(
+                            fontSize: 32.sp,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.paper,
+                            fontFamily: 'Georgia'),
                         children: [
-                          const TextSpan(text: "Don't have an account? "),
-                          TextSpan(
-                            text: 'Register',
-                            style: TextStyle(
-                                color: AppColors.brass, fontWeight: FontWeight.bold),
+                          const TextSpan(text: 'Nus'),
+                          TextSpan(text: '·', style: TextStyle(color: AppColors.brass)),
+                          const TextSpan(text: 'Nus'),
+                        ],
+                      ),
+                    ),
+                    6.verticalSpace,
+                    Text(
+                      'Welcome back — sign in to split the tab.',
+                      style: TextStyle(color: AppColors.slate, fontSize: 13.sp),
+                    ),
+                    32.verticalSpace,
+                    Container(
+                      padding: EdgeInsets.all(22.w),
+                      decoration: BoxDecoration(
+                        color: AppColors.paper,
+                        borderRadius: BorderRadius.circular(20.r),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.22),
+                            blurRadius: 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Sign in',
+                              style: TextStyle(
+                                  color: AppColors.ink,
+                                  fontSize: 15.sp,
+                                  fontWeight: FontWeight.w700)),
+                          14.verticalSpace,
+                          TextFormField(
+                            controller: _emailCtrl,
+                            enabled: !auth.isBusy,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            autofillHints: const [AutofillHints.email],
+                            style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
+                            decoration: AppTheme.inputDecoration('Email',
+                                icon: Icons.mail_outline),
+                            validator: (v) {
+                              final value = v?.trim() ?? '';
+                              if (value.isEmpty) return 'Enter your email.';
+                              if (!value.contains('@') || !value.contains('.')) {
+                                return 'Enter a valid email.';
+                              }
+                              return null;
+                            },
+                            onFieldSubmitted: (_) =>
+                                FocusScope.of(context).requestFocus(_passwordFocus),
+                          ),
+                          12.verticalSpace,
+                          TextFormField(
+                            controller: _passwordCtrl,
+                            focusNode: _passwordFocus,
+                            enabled: !auth.isBusy,
+                            obscureText: _obscure,
+                            textInputAction: TextInputAction.done,
+                            autofillHints: const [AutofillHints.password],
+                            style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
+                            decoration: AppTheme.inputDecoration('Password',
+                                    icon: Icons.lock_outline)
+                                .copyWith(
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscure ? Icons.visibility_off : Icons.visibility,
+                                  size: 18.r,
+                                  color: AppColors.slate,
+                                ),
+                                onPressed: () => setState(() => _obscure = !_obscure),
+                              ),
+                            ),
+                            validator: (v) => (v == null || v.isEmpty)
+                                ? 'Enter your password.'
+                                : null,
+                            onFieldSubmitted: (_) => _submit(auth),
+                          ),
+                          22.verticalSpace,
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50.h,
+                            child: ElevatedButton(
+                              onPressed: auth.isBusy ? null : () => _submit(auth),
+                              style: AppTheme.solidButton,
+                              child: auth.isBusy
+                                  ? SizedBox(
+                                      width: 20.r,
+                                      height: 20.r,
+                                      child: const CircularProgressIndicator(
+                                          color: AppColors.paper, strokeWidth: 2),
+                                    )
+                                  : Text('Sign in', style: TextStyle(fontSize: 14.sp)),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                  ),
-                ],
+                    22.verticalSpace,
+                    TextButton(
+                      onPressed: auth.isBusy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                              );
+                            },
+                      child: RichText(
+                        text: TextSpan(
+                          style: TextStyle(color: AppColors.slate, fontSize: 13.sp),
+                          children: [
+                            const TextSpan(text: "Don't have an account? "),
+                            TextSpan(
+                              text: 'Register',
+                              style: TextStyle(
+                                  color: AppColors.brass, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

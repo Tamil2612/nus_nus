@@ -42,6 +42,21 @@ class MemberDirectoryRepository {
     });
   }
 
+  /// Single-document fetch of one registered profile by uid — used
+  /// wherever the app needs one person's authoritative name (e.g. the
+  /// current user's own name when creating a group) without pulling the
+  /// whole directory down.
+  Future<AppUser?> fetchByUid(String uid) async {
+    try {
+      final doc = await _users.doc(uid).get();
+      if (!doc.exists) return null;
+      return AppUser.fromJson({'uid': doc.id, ...?doc.data()});
+    } catch (e, st) {
+      debugPrint('MemberDirectoryRepository.fetchByUid failed: $e\n$st');
+      return null;
+    }
+  }
+
   Future<void> upsertProfile(AppUser user) async {
     try {
       await _users.doc(user.uid).set({

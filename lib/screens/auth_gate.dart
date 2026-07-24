@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/split_provider.dart';
-import '../theme/app_colors.dart';
+import '../widgets/branded_loader.dart';
 import 'auth/login_screen.dart';
 import 'split_home_screen.dart';
 
@@ -21,39 +21,30 @@ class AuthGate extends StatelessWidget {
       context.read<SplitProvider>().setUserId(uid);
     });
 
+    Widget child;
+    String key;
     if (uid == null) {
-      return const LoginScreen();
+      child = const LoginScreen();
+      key = 'login';
+    } else if (context.watch<SplitProvider>().isLoading) {
+      // Covers both the moment auth flips over and the (usually brief)
+      // wait for the first Firestore snapshot — one crossfaded branded
+      // screen instead of two different spinners flashing one after the
+      // other, which is what made the old loading state feel broken.
+      child = const BrandedLoader(message: 'Getting your groups ready…');
+      key = 'loading';
+    } else {
+      child = const SplitHomeScreen();
+      key = 'home';
     }
 
-    return const _SplitProviderGuard(child: SplitHomeScreen());
-  }
-}
-
-/// Shows a spinner instead of the (briefly stale) home screen while
-/// SplitProvider is switching over to the newly signed-in user's data.
-class _SplitProviderGuard extends StatelessWidget {
-  final Widget child;
-  const _SplitProviderGuard({required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    final isLoading = context.watch<SplitProvider>().isLoading;
-    if (isLoading) {
-      return const Scaffold(
-        body: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(-0.4, -0.6),
-              radius: 1.2,
-              colors: [AppColors.inkSoft, AppColors.ink],
-            ),
-          ),
-          child: Center(
-            child: CircularProgressIndicator(color: AppColors.brass),
-          ),
-        ),
-      );
-    }
-    return child;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (widget, animation) =>
+          FadeTransition(opacity: animation, child: widget),
+      child: KeyedSubtree(key: ValueKey(key), child: child),
+    );
   }
 }
