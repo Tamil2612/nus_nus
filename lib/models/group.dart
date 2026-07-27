@@ -7,6 +7,7 @@ class Group {
   /// assigns a real id before the group is shown).
   final String id;
   final String name;
+  final String currency;
 
   /// Uid of the account that created this group. The creator is the only
   /// one who can rename/delete the group, manage its member list, edit or
@@ -36,6 +37,7 @@ class Group {
     required this.id,
     required this.name,
     required this.ownerId,
+    this.currency = 'AED',
     this.ownerName = '',
     this.members = const [],
     this.expenses = const [],
@@ -58,12 +60,14 @@ class Group {
 
   Group copyWith({
     String? name,
+    String? currency,
     List<Person>? members,
     List<Expense>? expenses,
   }) {
     return Group(
       id: id,
       name: name ?? this.name,
+      currency: currency ?? this.currency,
       ownerId: ownerId,
       ownerName: ownerName,
       members: members ?? this.members,
@@ -75,6 +79,7 @@ class Group {
   /// subcollection and are written there directly instead.
   Map<String, dynamic> toJson() => {
         'name': name,
+        'currency': currency,
         'ownerId': ownerId,
         'ownerName': ownerName,
         'memberUids': memberUids,
@@ -88,6 +93,7 @@ class Group {
   factory Group.fromJson(String id, Map<String, dynamic> json) => Group(
         id: id,
         name: json['name'] as String? ?? 'Untitled group',
+        currency: json['currency'] as String? ?? 'AED',
         ownerId: json['ownerId'] as String? ?? '',
         ownerName: json['ownerName'] as String? ?? '',
         members: (json['members'] as List? ?? [])

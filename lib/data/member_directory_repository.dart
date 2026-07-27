@@ -4,7 +4,7 @@ import '../models/app_user.dart';
 
 /// Reads the public directory of registered accounts — the `users/{uid}`
 /// profile documents (name/email only). Every signed-in user can read this
-/// collection (see the suggested Firestore rules in README.md); it never
+/// collection (see firestore.rules); it never touches anyone's private
 /// touches anyone's private `appState` subcollection.
 class MemberDirectoryRepository {
   MemberDirectoryRepository._();

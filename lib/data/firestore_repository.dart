@@ -56,10 +56,9 @@ import '../models/group.dart';
 ///         allow create: if request.auth != null &&
 ///           request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids &&
 ///           request.resource.data.addedBy == request.auth.uid;
-///         // Only the group's creator can edit or delete an expense —
-///         // including ones someone else logged.
+///         // Only the person who ADDED the expense can edit or delete it
 ///         allow update, delete: if request.auth != null &&
-///           request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId;
+///           request.auth.uid == resource.data.addedBy;
 ///       }
 ///     }
 ///   }

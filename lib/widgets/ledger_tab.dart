@@ -72,7 +72,6 @@ class _LedgerTabState extends State<LedgerTab> {
                   ),
                 )
               else
-                // Activity / Feed Items
                 ...expenses.reversed.map((e) {
                   final payer = provider.personById(e.payerId);
                   return _ActivityExpenseCard(
@@ -179,7 +178,8 @@ class _ActivityExpenseCard extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            fmtAed(expense.amount),
+                            fmtCurrency(expense.amount,
+                                context.read<SplitProvider>().currentGroup!.currency),
                             style: TextStyle(
                               fontSize: 15.sp,
                               fontWeight: FontWeight.w900,

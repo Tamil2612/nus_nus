@@ -204,7 +204,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
-                decoration: AppTheme.inputDecoration('Amount (AED)'),
+                decoration: AppTheme.inputDecoration(
+                    'Amount (${provider.currentGroup?.currency ?? 'AED'})'),
               ),
             ),
             const SizedBox(width: 8),
@@ -308,7 +309,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Allocated: ${fmtAed(allocated)}',
+                    Text(
+                        'Allocated: ${fmtCurrency(allocated, provider.currentGroup?.currency ?? 'AED')}',
                         style: TextStyle(
                             fontSize: 12.sp,
                             fontWeight: FontWeight.bold,
@@ -317,8 +319,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
                       isSettled
                           ? 'Matches total!'
                           : (allocated > totalAmount
-                              ? 'Over by ${fmtAed(allocated - totalAmount)}'
-                              : 'Remaining: ${fmtAed(totalAmount - allocated)}'),
+                              ? 'Over by ${fmtCurrency(allocated - totalAmount, provider.currentGroup?.currency ?? 'AED')}'
+                              : 'Remaining: ${fmtCurrency(totalAmount - allocated, provider.currentGroup?.currency ?? 'AED')}'),
                       style: TextStyle(
                           fontSize: 12.sp,
                           fontWeight: FontWeight.bold,

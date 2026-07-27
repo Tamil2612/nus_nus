@@ -1,11 +1,11 @@
 {
-    "name": "nus_nus",
-    "short_name": "nus_nus",
+    "name": "Nus·Nus",
+    "short_name": "Nus·Nus",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#hexcode",
-    "theme_color": "#hexcode",
-    "description": "A new Flutter project.",
+    "background_color": "#142B2B",
+    "theme_color": "#142B2B",
+    "description": "Nus-Nus — split the tab in dirhams, no payments involved.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

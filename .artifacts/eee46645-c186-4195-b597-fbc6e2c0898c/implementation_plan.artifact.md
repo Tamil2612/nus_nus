@@ -1,39 +1,32 @@
-# Implementation Plan: Cross-Group Overview Tab
+# Implementation Plan: Finalize Security & Logic Consistency
 
-Add a third tab called "Overview" to show aggregated balances across all groups, including a detailed group-by-group breakdown for each person.
+Ensure that the new security model is deployable and that all documentation correctly reflects the implemented features.
+
+## User Review Required
+
+> [!IMPORTANT]
+> I have confirmed that your logic changes in the app are correct. However, your `firestore.rules` will not be uploaded to Firebase during deployment because they are not yet referenced in `firebase.json`. I will add this configuration for you.
 
 ## Proposed Changes
 
-### [Component] SplitProvider
-#### [MODIFY] [split_provider.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/providers/split_provider.dart)
-- Update `OverallBalance` class to include a list of per-group contributions:
-  ```dart
-  class GroupContribution {
-    final String groupName;
-    final double amount;
-    GroupContribution(this.groupName, this.amount);
-  }
-  ```
-- Update `myBalancesByPerson()` to track which groups contribute to the total balance for each person.
+### 1. Firebase Configuration
+#### [MODIFY] [firebase.json](file:///home/tamizharasan/flutterProjects/nus_nus_updated/firebase.json)
+- Add the `firestore` configuration pointing to the `firestore.rules` file. This is required for `firebase deploy` to work.
 
-### [Component] SplitHomeScreen
-#### [MODIFY] [split_home_screen.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/screens/split_home_screen.dart)
-- Restore the third tab in `DefaultTabController`.
-- Add 'Overview' to the `TabBar`.
-- Add `OverviewTab()` to the `TabBarView`.
+### 2. Documentation Sync
+#### [MODIFY] [README.md](file:///home/tamizharasan/flutterProjects/nus_nus_updated/README.md)
+- Replace the default Flutter boilerplate with a concise description of the app and a "Security Rules" section containing the rules you created. This fixes the dangling references in the code.
 
-### [Component] OverviewTab
-#### [MODIFY] [overview_tab.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/widgets/overview_tab.dart)
-- Redesign the UI to match the "Nus·Nus" theme (dark gradient background, paper cards).
-- Implement an expandable card for each person in the overview:
-  - Header: Person's name and total aggregated balance.
-  - Expanded content: A list showing "In [Group Name]: [Amount]".
-- Ensure high contrast and clear text legibility.
+#### [MODIFY] [member_directory_repository.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/data/member_directory_repository.dart)
+- Update the comment to point to `firestore.rules` instead of `README.md` for the authoritative rule source.
+
+### 3. Logic Refinement
+#### [MODIFY] [balances_tab.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/widgets/balances_tab.dart)
+- Change the "Settle all dues" button text to "Settle one due" (or similar) to accurately reflect that it currently settles only the first found debt, or improve it to handle multiple debts if you'd like. (I'll stick to a text update for accuracy first).
 
 ## Verification Plan
 
 ### Manual Verification
-- Verify that a third tab "Overview" appears on the home screen.
-- Verify that the summary at the top correctly shows "OWED TO YOU" and "YOU OWE" totals across all groups.
-- Verify that clicking/expanding a person in the list shows exactly which groups the balance comes from.
-- Verify theme consistency with Activity and Balances tabs.
+1. Run `firebase deploy`. Verify that it now reports "Deploying firestore...".
+2. Check `README.md` and verify it contains the security documentation.
+3. Open the Balances tab and verify the button text accurately describes the action.

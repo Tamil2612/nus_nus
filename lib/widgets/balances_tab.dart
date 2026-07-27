@@ -30,7 +30,7 @@ class BalancesTab extends StatelessWidget {
             style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
           'This records that ${from?.name ?? '?'} paid ${to?.name ?? '?'} '
-          '${fmtAed(amount)} outside the app. It just updates the ledger — '
+          '${fmtCurrency(amount, provider.currentGroup?.currency ?? 'AED')} outside the app. It just updates the ledger — '
           'no money actually moves.',
           style: const TextStyle(color: AppColors.slate),
         ),
@@ -71,10 +71,20 @@ class BalancesTab extends StatelessWidget {
     double totalOwedToYou = 0;
     
     final pairs = provider.pairBalances;
-    // For this group specific summary:
-    // We need to find the Person ID linked to the current user in this group.
+    // For this group specific summary: find the Person linked to the
+    // signed-in user in *this* group. Deliberately does NOT fall back to
+    // "some other member" if we're not linked here — that would silently
+    // show a stranger's balance as if it were yours.
     final currentGroup = provider.currentGroup;
-    final myPerson = currentGroup?.members.firstWhere((p) => p.linkedUserId == provider.uid, orElse: () => currentGroup.members.first);
+    Person? myPerson;
+    if (currentGroup != null) {
+      for (final p in currentGroup.members) {
+        if (p.linkedUserId == provider.uid) {
+          myPerson = p;
+          break;
+        }
+      }
+    }
     final myId = myPerson?.id;
 
     for (final pb in pairs) {
@@ -106,7 +116,7 @@ class BalancesTab extends StatelessWidget {
                         child: Column(
                           children: [
                             Text(
-                              fmtAed(totalOwedByYou),
+                              fmtCurrency(totalOwedByYou, currentGroup?.currency ?? 'AED'),
                               style: TextStyle(fontSize: 22.sp, fontWeight: FontWeight.bold, color: AppColors.rust),
                             ),
                             4.verticalSpace,
@@ -119,7 +129,7 @@ class BalancesTab extends StatelessWidget {
                         child: Column(
                           children: [
                             Text(
-                              fmtAed(totalOwedToYou),
+                              fmtCurrency(totalOwedToYou, currentGroup?.currency ?? 'AED'),
                               style: TextStyle(fontSize: 22.sp, fontWeight: FontWeight.bold, color: AppColors.sage),
                             ),
                             4.verticalSpace,
@@ -141,6 +151,7 @@ class BalancesTab extends StatelessWidget {
                     return _BalanceTile(
                       person: to!,
                       amount: pb.owedAmount,
+                      currency: currentGroup?.currency ?? 'AED',
                       subtitle: 'unpaid balance',
                       isOwedByYou: true,
                     );
@@ -156,6 +167,7 @@ class BalancesTab extends StatelessWidget {
                     return _BalanceTile(
                       person: from!,
                       amount: pb.owedAmount,
+                      currency: currentGroup?.currency ?? 'AED',
                       subtitle: 'is due to pay you',
                       isOwedByYou: false,
                       onSettle: () => _confirmSettle(context, provider, pb.debtorId!, pb.creditorId!, pb.owedAmount),
@@ -163,7 +175,22 @@ class BalancesTab extends StatelessWidget {
                   }),
                 ],
                 
-                if (totalOwedByYou == 0 && totalOwedToYou == 0)
+                if (myId == null)
+                  Center(
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 60.h),
+                      child: Column(
+                        children: [
+                          Icon(Icons.help_outline, color: AppColors.slate, size: 48.r),
+                          12.verticalSpace,
+                          const EmptyHint(
+                              "You're not linked to a member in this group yet, "
+                              "so your personal balance can't be shown here."),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (totalOwedByYou == 0 && totalOwedToYou == 0)
                   Center(
                     child: Padding(
                       padding: EdgeInsets.only(top: 60.h),
@@ -171,7 +198,7 @@ class BalancesTab extends StatelessWidget {
                         children: [
                           Icon(Icons.check_circle_outline, color: AppColors.sage, size: 48.r),
                           12.verticalSpace,
-                          EmptyHint('No active balances. Everything is settled!'),
+                          const EmptyHint('No active balances. Everything is settled!'),
                         ],
                       ),
                     ),
@@ -181,29 +208,29 @@ class BalancesTab extends StatelessWidget {
           ),
         ),
         
-        // Bottom Action Button
-        Padding(
-          padding: EdgeInsets.all(16.w),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                // Logic to find first pair to settle or show picker
-                if (pairs.isNotEmpty) {
-                  final pb = pairs.first;
-                  _confirmSettle(context, provider, pb.debtorId!, pb.creditorId!, pb.owedAmount);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.brass,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25.r)),
-                padding: EdgeInsets.symmetric(vertical: 14.h),
+        // Bottom Action Button — only settles *your own* debts, never an
+        // arbitrary pair in the group that may have nothing to do with you.
+        if (myId != null && pairs.any((pb) => pb.debtorId == myId))
+          Padding(
+            padding: EdgeInsets.all(16.w),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  final myDebt = pairs.firstWhere((pb) => pb.debtorId == myId);
+                  _confirmSettle(context, provider, myDebt.debtorId!,
+                      myDebt.creditorId!, myDebt.owedAmount);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brass,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25.r)),
+                  padding: EdgeInsets.symmetric(vertical: 14.h),
+                ),
+                child: Text('Settle a debt', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.sp)),
               ),
-              child: Text('Settle all dues', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.sp)),
             ),
           ),
-        ),
       ],
     );
   }
@@ -212,6 +239,7 @@ class BalancesTab extends StatelessWidget {
 class _BalanceTile extends StatelessWidget {
   final Person person;
   final double amount;
+  final String currency;
   final String subtitle;
   final bool isOwedByYou;
   final VoidCallback? onSettle;
@@ -219,6 +247,7 @@ class _BalanceTile extends StatelessWidget {
   const _BalanceTile({
     required this.person,
     required this.amount,
+    required this.currency,
     required this.subtitle,
     required this.isOwedByYou,
     this.onSettle,
@@ -263,7 +292,7 @@ class _BalanceTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                fmtAed(amount),
+                fmtCurrency(amount, currency),
                 style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.ink),
               ),
               if (onSettle != null)

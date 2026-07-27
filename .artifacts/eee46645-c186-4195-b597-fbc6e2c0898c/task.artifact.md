@@ -1,4 +1,4 @@
-- [x] Update `SplitProvider` with detailed cross-group balance data
-- [x] Restore three-tab layout in `SplitHomeScreen`
-- [x] Redesign `OverviewTab` with Nus·Nus theme and expandable breakdowns
-- [x] Verify functionality
+- [x] Link `firestore.rules` in `firebase.json`
+- [x] Sync `README.md` with security rules and project description
+- [x] Correct repository documentation references
+- [x] Refine `BalancesTab` button text for accuracy

@@ -1,25 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:provider/provider.dart';
+import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
-import '../utils/currency_formatter.dart';
 
 class HeaderBar extends StatelessWidget {
   final double totalSpent;
+  final int tabIndex;
 
-  const HeaderBar({super.key, required this.totalSpent});
+  const HeaderBar({super.key, required this.totalSpent, this.tabIndex = 0});
 
   @override
   Widget build(BuildContext context) {
+    context.watch<SplitProvider>();
     return Padding(
       padding: EdgeInsets.fromLTRB(4.w, 16.h, 20.w, 8.h),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          IconButton(
-            icon: Icon(Icons.menu, color: AppColors.paper, size: 28.r),
-            onPressed: () {
-              Scaffold.of(context).openDrawer();
-            },
+          InkWell(
+            onTap: () => Scaffold.of(context).openDrawer(),
+            child: Padding(
+              padding:  EdgeInsets.symmetric(horizontal: 8.w),
+              child: Image.asset('assets/icon/menu.png', width: 28.w,color: AppColors.paper,),
+            ),
           ),
           8.horizontalSpace,
           Expanded(
@@ -49,30 +53,6 @@ class HeaderBar extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'TOTAL TABBED',
-                style: TextStyle(
-                  fontSize: 9.sp,
-                  letterSpacing: 1.1,
-                  color: AppColors.slate,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              Text(
-                fmtAed(totalSpent),
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.brassSoft,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
           ),
         ],
       ),

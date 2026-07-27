@@ -20,8 +20,11 @@ class $AssetsIconGen {
   const $AssetsIconGen();
 
   final AssetGenImage ai = const AssetGenImage('assets/icon/ai.png');
+  final AssetGenImage menu = const AssetGenImage('assets/icon/menu.png');
   final AssetGenImage nusNusIcon =
       const AssetGenImage('assets/icon/nus_nus_icon.png');
+  final AssetGenImage sideMenu =
+      const AssetGenImage('assets/icon/side-menu.png');
 }
 
 class AssetGenImage {

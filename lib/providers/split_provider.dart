@@ -201,7 +201,7 @@ class SplitProvider extends ChangeNotifier {
     }
   }
 
-  void addGroup(String name, {String? ownerName}) {
+  void addGroup(String name, {String? ownerName, String currency = 'AED'}) {
     final uid = _uid;
     if (uid == null) return;
     // Prefer the authoritative name resolved from the member directory —
@@ -227,6 +227,7 @@ class SplitProvider extends ChangeNotifier {
     final group = Group(
       id: FirestoreRepository.instance.newGroupId(),
       name: name.trim().isEmpty ? 'New Group' : name.trim(),
+      currency: currency,
       ownerId: uid,
       ownerName: resolvedOwnerName,
       members: [me],
@@ -254,11 +255,14 @@ class SplitProvider extends ChangeNotifier {
     FirestoreRepository.instance.deleteGroup(groupId);
   }
 
-  void renameGroup(String groupId, String newName) {
+  void renameGroup(String groupId, String newName, {String? newCurrency}) {
     final idx = _groupMeta.indexWhere((g) => g.id == groupId);
     if (idx == -1 || newName.trim().isEmpty) return;
     if (_groupMeta[idx].ownerId != _uid) return; // not the creator
-    final updated = _groupMeta[idx].copyWith(name: newName.trim());
+    final updated = _groupMeta[idx].copyWith(
+      name: newName.trim(),
+      currency: newCurrency,
+    );
     _groupMeta = [..._groupMeta];
     _groupMeta[idx] = updated;
     _rebuildGroups();
@@ -373,12 +377,13 @@ class SplitProvider extends ChangeNotifier {
   dynamic _buildSplitMap({
     required double amount,
     required Set<int> splitWith,
+    required String currency,
     Map<int, double>? customSplits,
   }) {
     if (customSplits != null && customSplits.isNotEmpty) {
       double sum = customSplits.values.fold(0, (a, b) => a + b);
       if ((sum - amount).abs() > 0.01) {
-        return 'Sum of splits (${fmtAed(sum)}) must equal total (${fmtAed(amount)})';
+        return 'Sum of splits (${fmtCurrency(sum, currency)}) must equal total (${fmtCurrency(amount, currency)})';
       }
       return customSplits;
     }
@@ -427,6 +432,7 @@ class SplitProvider extends ChangeNotifier {
     final splitResult = _buildSplitMap(
       amount: amount,
       splitWith: splitWith,
+      currency: group.currency,
       customSplits: customSplits,
     );
     if (splitResult is String) return splitResult; // error message
@@ -483,21 +489,27 @@ class SplitProvider extends ChangeNotifier {
     );
   }
 
-  /// Creator-only: deleting an expense someone else logged (or your own)
-  /// is a destructive action, so it's kept restricted to whoever owns the
-  /// group rather than opened up to every member.
+  /// deleting an expense someone else logged (or your own) is a destructive
+  /// action, so it's kept restricted to whoever originally added it.
   void removeExpense(String id) {
     final group = currentGroup;
-    if (group == null || group.ownerId != _uid) return;
+    if (group == null) return;
+    
+    final existingIndex = expenses.indexWhere((e) => e.id == id);
+    if (existingIndex == -1) return;
+    
+    final expense = expenses[existingIndex];
+    if (expense.addedBy != _uid) return; // not the person who added it
+
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
     notifyListeners();
     FirestoreRepository.instance.deleteExpense(group.id, id);
   }
 
-  /// Creator-only, including for expenses someone else added — see the
-  /// class-level note on [removeExpense] for why editing stays this
-  /// restrictive even though adding doesn't.
+  /// RESTRICTED TO THE CREATOR of the expense, even if they aren't the group
+  /// owner — see the class-level note on [removeExpense] for why editing
+  /// stays this restrictive even though anyone can add.
   String? editExpense({
     required String id,
     required String desc,
@@ -508,11 +520,15 @@ class SplitProvider extends ChangeNotifier {
   }) {
     final group = currentGroup;
     if (group == null) return 'Select a group first.';
-    if (group.ownerId != _uid) {
-      return 'Only ${group.ownerName.isEmpty ? 'the group creator' : group.ownerName} can edit this.';
-    }
+
     final existingIndex = expenses.indexWhere((e) => e.id == id);
     if (existingIndex == -1) return 'That expense no longer exists.';
+
+    final original = expenses[existingIndex];
+    if (original.addedBy != _uid) {
+      return 'Only the person who added this split can edit it.';
+    }
+
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
     if (payerId == null) return 'Add at least one person first.';
     if (splitWith.isEmpty) return 'Pick who this should be split between.';
@@ -520,11 +536,11 @@ class SplitProvider extends ChangeNotifier {
     final finalSplitMap = _buildSplitMap(
       amount: amount,
       splitWith: splitWith,
+      currency: group.currency,
       customSplits: customSplits,
     );
     if (finalSplitMap is String) return finalSplitMap; // error message
 
-    final original = expenses[existingIndex];
     final updatedExpense = original.copyWith(
       desc: desc.trim().isEmpty ? original.desc : desc.trim(),
       amount: amount,
@@ -576,6 +592,19 @@ class SplitProvider extends ChangeNotifier {
   List<Transfer> get settlement =>
       SettlementCalculator.computeSettlement(balances);
 
+  /// Aggregated net balance per currency across EVERY group the signed-in 
+  /// user is a member of.
+  Map<String, double> get globalNetStandings {
+    final standings = <String, double>{};
+    final mine = myBalancesByPerson();
+    for (final person in mine) {
+      person.currencyBalances.forEach((currency, amount) {
+        standings[currency] = (standings[currency] ?? 0) + amount;
+      });
+    }
+    return standings;
+  }
+
   // -- Cross-group overview ------------------------------------------------
 
   /// The signed-in user's *own* balance with each other person, combined
@@ -593,10 +622,10 @@ class SplitProvider extends ChangeNotifier {
     final uid = _uid;
     if (uid == null) return [];
 
-    final totals = <String, double>{};
     final displayNames = <String, String>{};
     final groupCounts = <String, int>{};
     final breakdowns = <String, List<GroupContribution>>{};
+    final currencyMaps = <String, Map<String, double>>{};
 
     for (final g in _groups) {
       final mine = g.members.where((p) => p.linkedUserId == uid).toList();
@@ -627,51 +656,146 @@ class SplitProvider extends ChangeNotifier {
 
         final key = counterpart.linkedUserId ??
             'name:${counterpart.name.trim().toLowerCase()}';
-        totals[key] = (totals[key] ?? 0) + signedFromMe;
+        
         displayNames.putIfAbsent(key, () => counterpart!.name.trim());
         if (seenInThisGroup.add(key)) {
           groupCounts[key] = (groupCounts[key] ?? 0) + 1;
         }
 
         if (signedFromMe.abs() > 0.005) {
+          currencyMaps.putIfAbsent(key, () => {})[g.currency] = 
+              (currencyMaps[key]![g.currency] ?? 0) + signedFromMe;
+
           breakdowns.putIfAbsent(key, () => []).add(
-                GroupContribution(g.name, signedFromMe),
+                GroupContribution(
+                  groupId: g.id,
+                  groupName: g.name,
+                  currency: g.currency,
+                  amount: signedFromMe,
+                  myId: myId,
+                  counterpartId: counterpartId,
+                ),
               );
         }
       }
     }
 
-    final result = totals.entries
-        .map((e) => OverallBalance(
-              name: displayNames[e.key] ?? e.key,
-              amount: e.value,
-              groupCount: groupCounts[e.key] ?? 0,
-              breakdown: breakdowns[e.key] ?? [],
+    final result = displayNames.keys
+        .map((key) => OverallBalance(
+              key: key,
+              name: displayNames[key]!,
+              groupCount: groupCounts[key] ?? 0,
+              currencyBalances: currencyMaps[key] ?? {},
+              breakdown: breakdowns[key] ?? [],
             ))
+        .where((o) => o.breakdown.isNotEmpty) // Only show people with active history
         .toList();
-    result.sort((a, b) => b.amount.abs().compareTo(a.amount.abs()));
+
+    result.sort((a, b) => b.primarySortAmount.compareTo(a.primarySortAmount));
     return result;
+  }
+
+  /// Settles all shared dues with a specific person across every group they
+  /// share. Returns a list of error messages (empty on total success).
+  Future<List<String>> settlePairwise(OverallBalance entry) async {
+    final errors = <String>[];
+    
+    // We iterate through the breakdown and record a settlement in every
+    // group where a balance exists.
+    for (final contrib in entry.breakdown) {
+      if (contrib.amount.abs() <= 0.005) continue;
+
+      // Settlement record logic:
+      // If amount > 0 (they owe you), then record that THEY paid YOU.
+      // If amount < 0 (you owe them), then record that YOU paid THEM.
+      final fromId = contrib.amount > 0 ? contrib.counterpartId : contrib.myId;
+      final toId = contrib.amount > 0 ? contrib.myId : contrib.counterpartId;
+      
+      final fromPerson = personByIdInGroup(contrib.groupId, fromId);
+      final toPerson = personByIdInGroup(contrib.groupId, toId);
+
+      if (fromPerson == null || toPerson == null) {
+        errors.add('Could not find members in group "${contrib.groupName}"');
+        continue;
+      }
+
+      // Record the expense directly in the specific group.
+      final newExpense = Expense(
+        id: FirestoreRepository.instance.newExpenseId(contrib.groupId),
+        desc: '${fromPerson.name} settled with ${toPerson.name} (Global Settle)',
+        amount: contrib.amount.abs(),
+        payerId: fromId,
+        splitMap: {toId: contrib.amount.abs()},
+        isSettlement: true,
+        addedBy: _uid,
+      );
+
+      try {
+        await FirestoreRepository.instance.createExpense(contrib.groupId, newExpense);
+        // We don't need to manually update local state here because the
+        // Firestore stream for that group will trigger a rebuild naturally.
+      } catch (e) {
+        errors.add('Failed to settle in "${contrib.groupName}": $e');
+      }
+    }
+
+    return errors;
+  }
+
+  /// Helper to find a person by ID within a specific group metadata (if loaded).
+  Person? personByIdInGroup(String groupId, int personId) {
+    final group = _groups.firstWhere((g) => g.id == groupId);
+    for (final p in group.members) {
+      if (p.id == personId) return p;
+    }
+    return null;
   }
 }
 
 class GroupContribution {
+  final String groupId;
   final String groupName;
+  final String currency;
   final double amount;
-  GroupContribution(this.groupName, this.amount);
+  final int myId;
+  final int counterpartId;
+
+  GroupContribution({
+    required this.groupId,
+    required this.groupName,
+    required this.currency,
+    required this.amount,
+    required this.myId,
+    required this.counterpartId,
+  });
 }
 
 /// One other person's net balance against the signed-in user, summed
 /// across every group they share.
 class OverallBalance {
+  final String key; // Unique identifier (UID or name-key)
   final String name;
-  final double amount; // positive = they owe you, negative = you owe them
   final int groupCount;
   final List<GroupContribution> breakdown;
 
+  /// Net balance keyed by currency code (e.g. {'AED': 500, 'USD': -20})
+  final Map<String, double> currencyBalances;
+
   OverallBalance({
+    required this.key,
     required this.name,
-    required this.amount,
     required this.groupCount,
+    this.currencyBalances = const {},
     this.breakdown = const [],
   });
+
+  /// Helpful for sorting: returns the maximum absolute balance across all currencies.
+  double get primarySortAmount {
+    if (currencyBalances.isEmpty) return 0;
+    double maxAbs = 0;
+    for (final amt in currencyBalances.values) {
+      if (amt.abs() > maxAbs) maxAbs = amt.abs();
+    }
+    return maxAbs;
+  }
 }
