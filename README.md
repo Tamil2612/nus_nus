@@ -40,27 +40,6 @@
 
 ---
 
-## 🧪 Testing Guide for Testers
-
-When testing Nus·Nus, please focus on these core workflows:
-
-1. **AI Parsing**:
-   - Navigate to the **Nus Ai** screen.
-   - Upload a clear receipt photo.
-   - Give a complex instruction like: *"Split between all except [Member Name]."*
-   - Verify the **AI Split Ready** card matches your request.
-
-2. **Cross-Group Totals**:
-   - Add expenses in two different groups with the same person but **different currencies**.
-   - Navigate to the **People** tab.
-   - Verify that the person's card shows **both** currency rows correctly with directional arrows.
-
-3. **Settlement Logic**:
-   - Try to "Settle" a debt where **you owe money**. Verify that the app blocks this and only allows the **creditor** to settle.
-   - Use the **Global Settle** button in the People tab and verify it creates settlement records in all shared groups.
-
----
-
 ## 🔒 Security Rules
 
 The application enforces strict data isolation and permission checks via Firestore Security Rules. These ensure that users can only view groups they are members of and only edit data they have created. (See `firestore.rules` for full technical definitions).
