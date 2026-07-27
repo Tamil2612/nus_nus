@@ -1,42 +1,66 @@
 # Nus·Nus (نسنس)
 
-A premium, localized expense splitting app built with Flutter and Firebase. "Nus·Nus" (meaning "half-half") allows users to track shared tabs, calculate complex splits using AI, and manage debts across multiple groups with ease.
+**Nus·Nus** (meaning "half-half") is a premium, localized expense-splitting application designed for ultimate clarity and transparency. Built with Flutter and Firebase, it combines a professional "Digital Receipt" aesthetic with cutting-edge AI to make managing shared finances effortless.
 
-## Key Features
-- **Dynamic Currency**: Per-group currency support (AED, USD, INR, etc.).
-- **Nus Ai**: Multimodal bill parsing using Gemini 1.5 Flash.
-- **Clear Views**: Ticket-style activity feed and aggregated "People" dashboard.
-- **Secure Settlements**: Creditor-only settlement confirmation.
+---
 
-## Security Model
+## 🌟 Key Features
 
-The following rules are defined in `firestore.rules` and enforced on the server:
+### 1. **Nus Ai (Multimodal Bill Parsing)**
+- **Vision Intelligence**: Powered by **Gemini 1.5 Flash**, Nus Ai can "read" your receipt photos directly.
+- **Natural Language Splitting**: Simply describe the split (e.g., *"Vivek paid. Split everything except the coffee evenly. I had the coffee."*) and let the AI do the math.
+- **Context-Aware**: The AI automatically identifies your group members and maps the split to the correct people.
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Users can only manage their own profile.
-    match /users/{uid} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null && request.auth.uid == uid;
-    }
+### 2. **Dynamic Multi-Currency Support**
+- **Per-Group Currency**: Create different groups for different regions (e.g., "Dubai Trip" in **AED**, "USA Trip" in **USD**).
+- **Intelligent Formatting**: The app automatically applies the correct symbols and regional formatting across all screens.
+- **Aggregated View**: Your global standings are tracked separately per currency to ensure 100% accuracy.
 
-    // Groups are accessible by members and owned by creators.
-    match /groups/{groupId} {
-      allow read: if request.auth != null && request.auth.uid in resource.data.memberUids;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.ownerId;
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
+### 3. **Unique "Split-Ticket" Activity Feed**
+- **Professional Layout**: A chronologically reversed feed where every expense is displayed as a stylized digital "tab" or ticket.
+- **Visual Hierarchy**: Immediate clarity on who paid, how much was spent, and who is participating in the split.
 
-      // Expenses within a group.
-      match /expenses/{expenseId} {
-        allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
-        allow create: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids && request.resource.data.addedBy == request.auth.uid;
-        
-        // Only the original creator of a split can edit or delete it.
-        allow update, delete: if request.auth != null && request.auth.uid == resource.data.addedBy;
-      }
-    }
-  }
-}
-```
+### 4. **"People" Dashboard**
+- **Pairwise Standing**: A dedicated tab that aggregates all your debts and credits across every group you participate in.
+- **Directional Flow**: Clear visual indicators show exactly who owes whom (e.g., `YOU <- AED 50 <- RAHUL`).
+- **One-Tap Global Settle**: Resolve all shared dues with a specific person across all groups with a single click.
+
+### 5. **Secure & Fair Logic**
+- **Creditor-Only Settlement**: To ensure honesty, only the person who is **owed money** can officially confirm and record a settlement.
+- **Creator Controls**: The person who adds a split has full administrative control to edit or delete it.
+- **Soft-Deletion**: Members with history are archived rather than deleted, preserving historical balance accuracy.
+
+---
+
+## 🛠️ Technical Stack
+- **Frontend**: Flutter (3.x) with Provider for state management.
+- **Backend**: Firebase (Firestore for real-time sync, Auth for secure login).
+- **Intelligence**: Google AI SDK (Gemini 1.5 Flash).
+- **Distribution**: PWA-ready for instant iOS and Android home screen installation.
+
+---
+
+## 🧪 Testing Guide for Testers
+
+When testing Nus·Nus, please focus on these core workflows:
+
+1. **AI Parsing**:
+   - Navigate to the **Nus Ai** screen.
+   - Upload a clear receipt photo.
+   - Give a complex instruction like: *"Split between all except [Member Name]."*
+   - Verify the **AI Split Ready** card matches your request.
+
+2. **Cross-Group Totals**:
+   - Add expenses in two different groups with the same person but **different currencies**.
+   - Navigate to the **People** tab.
+   - Verify that the person's card shows **both** currency rows correctly with directional arrows.
+
+3. **Settlement Logic**:
+   - Try to "Settle" a debt where **you owe money**. Verify that the app blocks this and only allows the **creditor** to settle.
+   - Use the **Global Settle** button in the People tab and verify it creates settlement records in all shared groups.
+
+---
+
+## 🔒 Security Rules
+
+The application enforces strict data isolation and permission checks via Firestore Security Rules. These ensure that users can only view groups they are members of and only edit data they have created. (See `firestore.rules` for full technical definitions).
