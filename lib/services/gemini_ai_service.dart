@@ -101,7 +101,7 @@ JSON Schema:
     } catch (e) {
       print('--- GEMINI ERROR ---');
       print('Error: $e');
-      print('Check if your API Key is valid and has access to gemini-1.5-flash.');
+      print('Check if your API Key is valid and has access to gemini-3.6-flash.');
       print('Standard keys from AI Studio start with "AIza".');
       print('--------------------');
       

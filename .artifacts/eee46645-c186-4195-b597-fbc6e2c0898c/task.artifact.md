@@ -1,4 +1,5 @@
-- [x] Link `firestore.rules` in `firebase.json`
-- [x] Sync `README.md` with security rules and project description
-- [x] Correct repository documentation references
-- [x] Refine `BalancesTab` button text for accuracy
+- [x] Implement member removal UI in `LedgerTab`
+    - [x] Add `_confirmRemovePerson` dialog logic
+    - [x] Update `_GroupRoster` to show delete icons for owners
+    - [x] Connect removal logic to `SplitProvider`
+- [x] Verify functionality

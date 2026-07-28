@@ -457,22 +457,41 @@ class SplitProvider extends ChangeNotifier {
     return null;
   }
 
-  /// Records that [fromId] paid [toId] [amount] to settle up. This is the
-  /// action behind the "Settle up" buttons in the Balances tab — only
-  /// available to the group's creator; everyone else can see the amount
-  /// but not clear it themselves.
-  String? settleUp(int fromId, int toId, double amount) {
-    final group = currentGroup;
-    if (group == null) return 'Select a group first.';
+  /// Records that [fromId] paid [toId] [amount] to settle up, in
+  /// [groupId] (defaults to the currently open group). This is the single
+  /// place that decides who's allowed to confirm a settlement — both the
+  /// per-group Balances tab *and* the cross-group Overview's "settle all
+  /// dues" go through this, so the same rule (only the group's creator or
+  /// the person actually being paid can confirm) applies everywhere,
+  /// rather than the two surfaces silently drifting apart.
+  String? settleUp(int fromId, int toId, double amount, {String? groupId}) {
+    final targetId = groupId ?? currentGroup?.id;
+    if (targetId == null) return 'Select a group first.';
+    if (amount <= 0) return 'Enter a valid amount.';
 
-    final fromPerson = personById(fromId);
-    final toPerson = personById(toId);
+    Group? group;
+    for (final g in _groups) {
+      if (g.id == targetId) {
+        group = g;
+        break;
+      }
+    }
+    if (group == null) return 'Could not find that group.';
+
+    Person? fromPerson;
+    Person? toPerson;
+    for (final p in group.members) {
+      if (p.id == fromId) fromPerson = p;
+      if (p.id == toId) toPerson = p;
+    }
     if (fromPerson == null || toPerson == null) {
       return 'Could not find one of the people in this settlement.';
     }
 
-    // Permission check: only the group owner OR the person being paid (creditor) 
-    // can officially record this settlement.
+    // Permission check: only the group owner OR the person being paid
+    // (creditor) can officially record this settlement — a debtor can't
+    // unilaterally mark their own debt as paid without the creditor (or
+    // the group owner) confirming it.
     final isOwner = group.ownerId == _uid;
     final isCreditor = toPerson.linkedUserId == _uid;
 
@@ -480,13 +499,28 @@ class SplitProvider extends ChangeNotifier {
       return 'Only ${toPerson.name} or the group creator can settle this up.';
     }
 
-    return addExpense(
+    if (!group.memberUids.contains(_uid)) {
+      return "You're not a member of this group.";
+    }
+
+    final newExpense = Expense(
+      id: FirestoreRepository.instance.newExpenseId(group.id),
       desc: '${fromPerson.name} settled with ${toPerson.name}',
       amount: amount,
       payerId: fromId,
-      splitWith: {toId},
+      splitMap: {toId: amount},
       isSettlement: true,
+      addedBy: _uid,
     );
+
+    _expensesByGroup[group.id] = [
+      ...(_expensesByGroup[group.id] ?? const []),
+      newExpense,
+    ];
+    _rebuildGroups();
+    notifyListeners();
+    FirestoreRepository.instance.createExpense(group.id, newExpense);
+    return null;
   }
 
   /// deleting an expense someone else logged (or your own) is a destructive
@@ -697,11 +731,14 @@ class SplitProvider extends ChangeNotifier {
 
   /// Settles all shared dues with a specific person across every group they
   /// share. Returns a list of error messages (empty on total success).
+  ///
+  /// Deliberately calls [settleUp] per group rather than writing the
+  /// settlement expense directly — that's what makes "settle up from here
+  /// owes you, that side is enforced the same way everywhere, not just in
+  /// this specific group's Balances tab.
   Future<List<String>> settlePairwise(OverallBalance entry) async {
     final errors = <String>[];
-    
-    // We iterate through the breakdown and record a settlement in every
-    // group where a balance exists.
+
     for (final contrib in entry.breakdown) {
       if (contrib.amount.abs() <= 0.005) continue;
 
@@ -710,46 +747,23 @@ class SplitProvider extends ChangeNotifier {
       // If amount < 0 (you owe them), then record that YOU paid THEM.
       final fromId = contrib.amount > 0 ? contrib.counterpartId : contrib.myId;
       final toId = contrib.amount > 0 ? contrib.myId : contrib.counterpartId;
-      
-      final fromPerson = personByIdInGroup(contrib.groupId, fromId);
-      final toPerson = personByIdInGroup(contrib.groupId, toId);
 
-      if (fromPerson == null || toPerson == null) {
-        errors.add('Could not find members in group "${contrib.groupName}"');
-        continue;
-      }
-
-      // Record the expense directly in the specific group.
-      final newExpense = Expense(
-        id: FirestoreRepository.instance.newExpenseId(contrib.groupId),
-        desc: '${fromPerson.name} settled with ${toPerson.name} (Global Settle)',
-        amount: contrib.amount.abs(),
-        payerId: fromId,
-        splitMap: {toId: contrib.amount.abs()},
-        isSettlement: true,
-        addedBy: _uid,
+      final error = settleUp(
+        fromId,
+        toId,
+        contrib.amount.abs(),
+        groupId: contrib.groupId,
       );
-
-      try {
-        await FirestoreRepository.instance.createExpense(contrib.groupId, newExpense);
-        // We don't need to manually update local state here because the
-        // Firestore stream for that group will trigger a rebuild naturally.
-      } catch (e) {
-        errors.add('Failed to settle in "${contrib.groupName}": $e');
+      if (error != null) {
+        errors.add('"${contrib.groupName}": $error');
       }
+      // No manual local-state update needed on success — the Firestore
+      // stream for that group picks up the new expense and rebuilds.
     }
 
     return errors;
   }
 
-  /// Helper to find a person by ID within a specific group metadata (if loaded).
-  Person? personByIdInGroup(String groupId, int personId) {
-    final group = _groups.firstWhere((g) => g.id == groupId);
-    for (final p in group.members) {
-      if (p.id == personId) return p;
-    }
-    return null;
-  }
 }
 
 class GroupContribution {

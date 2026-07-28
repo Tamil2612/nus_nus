@@ -5,6 +5,7 @@ import '../models/person.dart';
 import '../models/expense.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import '../screens/expense_detail_screen.dart';
 import 'add_member_sheet.dart';
@@ -17,6 +18,59 @@ class LedgerTab extends StatefulWidget {
 }
 
 class _LedgerTabState extends State<LedgerTab> {
+  Future<void> _confirmRemovePerson(
+      BuildContext context, SplitProvider provider, Person person) async {
+    final hasHistory = provider.expenses.any(
+        (e) => e.payerId == person.id || e.splitMap.containsKey(person.id));
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.paper,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        title: Text('Remove ${person.name}?',
+            style: const TextStyle(
+                color: AppColors.ink, fontWeight: FontWeight.bold)),
+        content: Text(
+          hasHistory
+              ? '${person.name} has expense history in this group. They\'ll be hidden '
+                  'from new expenses, but past activity and any balance '
+                  'they still owe or are owed stays intact.'
+              : '${person.name} has no expenses yet, so they\'ll be removed completely.',
+          style: const TextStyle(color: AppColors.slate),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child:
+                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: AppTheme.solidButton.copyWith(
+              backgroundColor: WidgetStateProperty.all(AppColors.rust),
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final archived = provider.removePerson(person.id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(archived
+            ? '${person.name} removed from the active list — history kept.'
+            : '${person.name} removed.'),
+        backgroundColor: AppColors.inkSoft,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
@@ -36,11 +90,17 @@ class _LedgerTabState extends State<LedgerTab> {
                   children: [
                     Text(
                       'Activity Feed',
-                      style: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.bold, color: AppColors.paper),
+                      style: TextStyle(
+                          fontSize: 20.sp,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.paper),
                     ),
                     Text(
                       '${expenses.length} splits',
-                      style: TextStyle(fontSize: 12.sp, color: AppColors.slate, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                          fontSize: 12.sp,
+                          color: AppColors.slate,
+                          fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -51,6 +111,7 @@ class _LedgerTabState extends State<LedgerTab> {
                 people: provider.people,
                 isOwner: provider.isCurrentGroupOwner,
                 onAdd: () => showAddRegisteredMemberSheet(context),
+                onRemove: (p) => _confirmRemovePerson(context, provider, p),
               ),
               24.verticalSpace,
 
@@ -60,12 +121,15 @@ class _LedgerTabState extends State<LedgerTab> {
                   child: Center(
                     child: Column(
                       children: [
-                        Icon(Icons.receipt_long_outlined, size: 64.r, color: AppColors.slate.withValues(alpha: 0.3)),
+                        Icon(Icons.receipt_long_outlined,
+                            size: 64.r,
+                            color: AppColors.slate.withValues(alpha: 0.3)),
                         16.verticalSpace,
                         Text(
                           'No activity yet.\nAdd a split to get started!',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.slate, fontSize: 14.sp),
+                          style: TextStyle(
+                              color: AppColors.slate, fontSize: 14.sp),
                         ),
                       ],
                     ),
@@ -80,12 +144,13 @@ class _LedgerTabState extends State<LedgerTab> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => ExpenseDetailScreen(expense: e)),
+                        MaterialPageRoute(
+                            builder: (_) => ExpenseDetailScreen(expense: e)),
                       );
                     },
                   );
                 }),
-              
+
               100.verticalSpace, // Bottom padding
             ],
           ),
@@ -136,7 +201,9 @@ class _ActivityExpenseCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      expense.isSettlement ? Icons.handshake : Icons.receipt_long,
+                      expense.isSettlement
+                          ? Icons.handshake
+                          : Icons.receipt_long,
                       color: AppColors.ink,
                       size: 24.r,
                     ),
@@ -157,7 +224,8 @@ class _ActivityExpenseCard extends StatelessWidget {
               // Main Info
               Expanded(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
+                  padding:
+                      EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -178,8 +246,12 @@ class _ActivityExpenseCard extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            fmtCurrency(expense.amount,
-                                context.read<SplitProvider>().currentGroup!.currency),
+                            fmtCurrency(
+                                expense.amount,
+                                context
+                                    .read<SplitProvider>()
+                                    .currentGroup!
+                                    .currency),
                             style: TextStyle(
                               fontSize: 15.sp,
                               fontWeight: FontWeight.w900,
@@ -226,13 +298,14 @@ class _ActivityExpenseCard extends StatelessWidget {
 
 class _ParticipantCircles extends StatelessWidget {
   final Expense expense;
+
   const _ParticipantCircles({required this.expense});
 
   @override
   Widget build(BuildContext context) {
     final provider = context.read<SplitProvider>();
     final ids = expense.splitWith.take(4).toList();
-    
+
     return Row(
       children: [
         for (int i = 0; i < ids.length; i++)
@@ -245,10 +318,14 @@ class _ParticipantCircles extends StatelessWidget {
               ),
               child: CircleAvatar(
                 radius: 9.r,
-                backgroundColor: provider.personById(ids[i])?.color ?? AppColors.slate,
+                backgroundColor:
+                    provider.personById(ids[i])?.color ?? AppColors.slate,
                 child: Text(
                   provider.personById(ids[i])?.name[0].toUpperCase() ?? '?',
-                  style: TextStyle(fontSize: 7.sp, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: TextStyle(
+                      fontSize: 7.sp,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
                 ),
               ),
             ),
@@ -260,7 +337,10 @@ class _ParticipantCircles extends StatelessWidget {
               padding: EdgeInsets.only(left: 36.w),
               child: Text(
                 '+${expense.splitWith.length - 4}',
-                style: TextStyle(fontSize: 10.sp, color: AppColors.slate, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    fontSize: 10.sp,
+                    color: AppColors.slate,
+                    fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -273,11 +353,13 @@ class _GroupRoster extends StatelessWidget {
   final List<Person> people;
   final bool isOwner;
   final VoidCallback onAdd;
+  final Function(Person)? onRemove;
 
   const _GroupRoster({
     required this.people,
     required this.isOwner,
     required this.onAdd,
+    this.onRemove,
   });
 
   @override
@@ -325,10 +407,13 @@ class _GroupRoster extends StatelessWidget {
             itemCount: people.length,
             itemBuilder: (context, index) {
               final p = people[index];
+              final isMe = p.linkedUserId == context.read<SplitProvider>().uid;
+
               return Padding(
                 padding: EdgeInsets.only(right: 8.w),
                 child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12.w),
+                  padding: EdgeInsets.only(
+                      left: 12.w, right: (isOwner && !isMe) ? 4.w : 12.w),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20.r),
@@ -341,14 +426,31 @@ class _GroupRoster extends StatelessWidget {
                         backgroundColor: p.color,
                         child: Text(
                           p.name[0].toUpperCase(),
-                          style: TextStyle(fontSize: 8.sp, color: Colors.white, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              fontSize: 8.sp,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold),
                         ),
                       ),
                       8.horizontalSpace,
                       Text(
                         p.name,
-                        style: TextStyle(fontSize: 12.sp, color: AppColors.paper, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                            fontSize: 12.sp,
+                            color: AppColors.paper,
+                            fontWeight: FontWeight.w600),
                       ),
+                      if (isOwner && !isMe) ...[
+                        4.horizontalSpace,
+                        InkWell(
+                          onTap: () => onRemove?.call(p),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4.w),
+                            child: Icon(Icons.close_rounded,
+                                size: 14.r, color: AppColors.slate),
+                          ),
+                        )
+                      ],
                     ],
                   ),
                 ),

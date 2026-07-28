@@ -141,7 +141,8 @@ class FirestoreRepository {
   }
 
   /// Overwrites an existing expense in place. Restricted server-side to
-  /// the group's creator, regardless of who originally logged it.
+  /// whoever originally added it (`addedBy`) — not the group's creator,
+  /// unless they happen to be the same person. See [deleteExpense].
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
       await _expensesCol(groupId).doc(expense.id).set(expense.toJson());

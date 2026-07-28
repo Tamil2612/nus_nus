@@ -1,32 +1,38 @@
-# Implementation Plan: Finalize Security & Logic Consistency
+# Implementation Plan: Soft-Removal of Group Members
 
-Ensure that the new security model is deployable and that all documentation correctly reflects the implemented features.
+Implement a feature to allow group owners to remove members from a group using a "soft-delete" approach (archiving). This ensures that historical expense data remains accurate while hiding removed members from current pickers and the active roster.
 
 ## User Review Required
 
-> [!IMPORTANT]
-> I have confirmed that your logic changes in the app are correct. However, your `firestore.rules` will not be uploaded to Firebase during deployment because they are not yet referenced in `firebase.json`. I will add this configuration for you.
+> [!NOTE]
+> Members with expense history will be **archived** (hidden from new expenses but kept for history), while members with no history will be fully removed from the group document.
 
 ## Proposed Changes
 
-### 1. Firebase Configuration
-#### [MODIFY] [firebase.json](file:///home/tamizharasan/flutterProjects/nus_nus_updated/firebase.json)
-- Add the `firestore` configuration pointing to the `firestore.rules` file. This is required for `firebase deploy` to work.
+### [Component] SplitProvider
+#### [MODIFY] [split_provider.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/providers/split_provider.dart)
+- The existing `removePerson(int id)` method already implements the archiving logic. No functional changes needed here, but I will double-check its integrity.
 
-### 2. Documentation Sync
-#### [MODIFY] [README.md](file:///home/tamizharasan/flutterProjects/nus_nus_updated/README.md)
-- Replace the default Flutter boilerplate with a concise description of the app and a "Security Rules" section containing the rules you created. This fixes the dangling references in the code.
-
-#### [MODIFY] [member_directory_repository.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/data/member_directory_repository.dart)
-- Update the comment to point to `firestore.rules` instead of `README.md` for the authoritative rule source.
-
-### 3. Logic Refinement
-#### [MODIFY] [balances_tab.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/widgets/balances_tab.dart)
-- Change the "Settle all dues" button text to "Settle one due" (or similar) to accurately reflect that it currently settles only the first found debt, or improve it to handle multiple debts if you'd like. (I'll stick to a text update for accuracy first).
+### [Component] LedgerTab (UI)
+#### [MODIFY] [ledger_tab.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/widgets/ledger_tab.dart)
+- **`_confirmRemovePerson`**: Add a private helper method to show a confirmation dialog before removal, explaining the difference between full removal and archiving (as previously requested).
+- **`_GroupRoster`**:
+  - Add an `onRemove` callback: `Function(Person)? onRemove`.
+  - Update the member chips to include a small delete icon (visible only to the owner).
+  - Tapping the delete icon will trigger the `_confirmRemovePerson` dialog.
+- **`LedgerTab` State**: Pass the new removal logic to the `_GroupRoster` widget.
 
 ## Verification Plan
 
 ### Manual Verification
-1. Run `firebase deploy`. Verify that it now reports "Deploying firestore...".
-2. Check `README.md` and verify it contains the security documentation.
-3. Open the Balances tab and verify the button text accurately describes the action.
+1. **Remove Member with History**:
+   - Add an expense involving Member A.
+   - Attempt to remove Member A.
+   - Verify the dialog warns that they have history and will be "hidden" but kept for records.
+   - Confirm and verify they no longer appear in the "MEMBERS" list or new expense pickers.
+2. **Remove Member without History**:
+   - Add Member B.
+   - Attempt to remove Member B immediately.
+   - Verify the dialog simply asks to remove them completely.
+   - Confirm and verify they are gone from the group.
+3. **Owner Check**: Verify that a non-owner member cannot see the remove icons.
