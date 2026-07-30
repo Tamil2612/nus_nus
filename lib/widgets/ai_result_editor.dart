@@ -143,7 +143,7 @@ class _AiResultEditorState
           18.verticalSpace,
 
           DropdownButtonFormField<String>(
-            value: payer,
+            initialValue: payer,
             decoration:
             const InputDecoration(
               labelText:

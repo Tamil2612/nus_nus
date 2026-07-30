@@ -194,44 +194,6 @@ class _LandingScreenState extends State<LandingScreen>
     );
   }
 
-  Future<void> _confirmDeleteGroup(BuildContext context, SplitProvider provider,
-      String groupId, String name) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: Text('Delete "$name"?',
-            style: const TextStyle(
-                color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This permanently deletes the group along with all its members '
-          'and expense history. This can\'t be undone.',
-          style: TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child:
-                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      provider.removeGroup(groupId);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();

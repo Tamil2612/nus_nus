@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/phone_input_field.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -14,10 +15,13 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _phoneKey = GlobalKey<PhoneInputFieldState>();
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _emailFocus = FocusNode();
+  final _phoneFocus = FocusNode();
   final _passwordFocus = FocusNode();
   bool _obscure = true;
 
@@ -25,8 +29,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
+    _phoneCtrl.dispose();
     _passwordCtrl.dispose();
     _emailFocus.dispose();
+    _phoneFocus.dispose();
     _passwordFocus.dispose();
     super.dispose();
   }
@@ -39,6 +45,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       name: _nameCtrl.text,
       email: _emailCtrl.text,
       password: _passwordCtrl.text,
+      phoneNumber: _phoneKey.currentState?.fullNumber ?? _phoneCtrl.text,
     );
 
     if (error != null && mounted) {
@@ -132,7 +139,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               borderRadius: BorderRadius.circular(20.r),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.22),
+                                  color: Colors.black.withValues(alpha: 0.22),
                                   blurRadius: 20,
                                   offset: const Offset(0, 10),
                                 ),
@@ -174,7 +181,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     return null;
                                   },
                                   onFieldSubmitted: (_) =>
-                                      FocusScope.of(context).requestFocus(_passwordFocus),
+                                      FocusScope.of(context).requestFocus(_phoneFocus),
+                                ),
+                                12.verticalSpace,
+                                PhoneInputField(
+                                  key: _phoneKey,
+                                  controller: _phoneCtrl,
+                                  focusNode: _phoneFocus,
+                                  enabled: !auth.isBusy,
+                                  nextFocusNode: _passwordFocus,
                                 ),
                                 12.verticalSpace,
                                 TextFormField(

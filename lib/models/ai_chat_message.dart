@@ -1,5 +1,3 @@
-import 'group.dart';
-
 enum AiChatMessageType { text, groupPicker, memberHint, resultPreview }
 
 class AiChatMessage {

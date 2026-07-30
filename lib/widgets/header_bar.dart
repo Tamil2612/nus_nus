@@ -3,7 +3,6 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
-import '../utils/currency_formatter.dart';
 
 class HeaderBar extends StatelessWidget {
   const HeaderBar({super.key});

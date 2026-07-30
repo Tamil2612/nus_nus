@@ -186,7 +186,19 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
   @override
   Widget build(BuildContext context) {
     final entry = widget.entry;
+    final provider = context.watch<SplitProvider>();
     
+    // Check if user has permission to settle ANY of the groups in this breakdown.
+    // Permission: Only the group owner OR the person being paid (creditor) can confirm.
+    final canSettleAtLeastOne = entry.breakdown.any((contrib) {
+      if (contrib.amount.abs() <= 0.005) return false;
+      
+      final isOwner = provider.groups.any((g) => g.id == contrib.groupId && g.ownerId == provider.uid);
+      final isCreditor = contrib.amount > 0; // In OverallBalance context, positive = they owe you.
+      
+      return isOwner || isCreditor;
+    });
+
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
       child: AnimatedContainer(
@@ -295,7 +307,7 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isSettling ? null : () => _onSettleAll(context.read<SplitProvider>()),
+                  onPressed: (_isSettling || !canSettleAtLeastOne) ? null : () => _onSettleAll(provider),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.ink,
                     foregroundColor: AppColors.paper,
@@ -304,7 +316,11 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
                   ),
                   child: _isSettling 
                     ? 16.verticalSpace
-                    : Text('SETTLE ALL DUES WITH ${entry.name.toUpperCase()}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.sp)),
+                    : Text(
+                        canSettleAtLeastOne 
+                          ? 'SETTLE ALL DUES WITH ${entry.name.toUpperCase()}'
+                          : 'OTHER PERSON MUST CONFIRM SETTLEMENT', 
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.sp)),
                 ),
               ),
             ],

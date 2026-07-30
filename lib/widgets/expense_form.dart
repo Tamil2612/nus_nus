@@ -211,7 +211,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
             8.horizontalSpace,
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _payerId,
+                initialValue: _payerId,
                 decoration: AppTheme.inputDecoration('Paid by'),
                 style: TextStyle(color: AppColors.ink, fontSize: 13.5.sp),
                 dropdownColor: Colors.white,
@@ -278,7 +278,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
                   boxShadow: on
                       ? [
                           BoxShadow(
-                              color: AppColors.ink.withOpacity(0.2),
+                              color: AppColors.ink.withValues(alpha: 0.2),
                               blurRadius: 4,
                               offset: const Offset(0, 2))
                         ]

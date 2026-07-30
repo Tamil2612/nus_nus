@@ -62,6 +62,7 @@ class MemberDirectoryRepository {
       await _users.doc(user.uid).set({
         'name': user.name,
         'email': user.email,
+        'phoneNumber': user.phoneNumber,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e, st) {

@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../screens/group_detail_screen.dart';
+import '../screens/edit_profile_screen.dart';
 
 class NusDrawer extends StatelessWidget {
   final String? currentGroupId;
@@ -96,10 +97,12 @@ class NusDrawer extends StatelessWidget {
                     icon: Icons.person_outline,
                     label: 'EDIT PROFILE',
                     onTap: () {
-                      // TODO: Implement profile edit
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Settings coming soon!')),
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const EditProfileScreen(),
+                        ),
                       );
                     },
                   ),

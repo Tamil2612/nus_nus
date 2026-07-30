@@ -99,8 +99,8 @@ class ExpenseDetailScreen extends StatelessWidget {
         .toList()
         .cast<Person>();
     
-    final isOwner = provider.isCurrentGroupOwner;
     final totalParticipants = splitParticipants.length;
+    final isAdder = liveExpense.addedBy == provider.uid;
     
     return Scaffold(
       body: Container(
@@ -126,7 +126,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                     ),
                     Row(
                       children: [
-                        if (liveExpense.addedBy == provider.uid) ...[
+                        if (isAdder) ...[
                           if (!liveExpense.isSettlement)
                             IconButton(
                               icon: const Icon(Icons.edit_outlined,

@@ -301,6 +301,7 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
                               onGroupChanged: (group) {
                                 setState(() {
                                   _selectedGroup = group;
+                                  _aiResult = null; // Reset AI result when group changes
                                 });
                               },
                             ),

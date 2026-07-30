@@ -7,7 +7,7 @@
 ## 🌟 Key Features
 
 ### 1. **Nus Ai (Multimodal Bill Parsing)**
-- **Vision Intelligence**: Powered by **Gemini 1.5 Flash**, Nus Ai can "read" your receipt photos directly.
+- **Vision Intelligence**: Powered by **Gemini 3.6 Flash**, Nus Ai can "read" your receipt photos directly.
 - **Natural Language Splitting**: Simply describe the split (e.g., *"Person A paid. Split everything except the coffee evenly. I had the coffee."*) and let the AI do the math.
 - **Context-Aware**: The AI automatically identifies your group members and maps the split to the correct people.
 
@@ -35,7 +35,8 @@
 ## 🛠️ Technical Stack
 - **Frontend**: Flutter (3.x) with Provider for state management.
 - **Backend**: Firebase (Firestore for real-time sync, Auth for secure login).
-- **Intelligence**: Google AI SDK (Gemini 1.5 Flash).
+- **Intelligence**: Firebase AI Logic SDK (Gemini 3.6 Flash).
+- **Security**: Firebase App Check for API protection.
 - **Distribution**: PWA-ready for instant iOS and Android home screen installation.
 
 ---

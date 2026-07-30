@@ -77,6 +77,7 @@ class SplitProvider extends ChangeNotifier {
     MemberDirectoryRepository.instance.fetchByUid(uid).then((profile) {
       if (_uid != uid || profile == null || profile.name.isEmpty) return;
       _myDisplayName = profile.name;
+      notifyListeners();
     });
 
     _groupsSub = FirestoreRepository.instance.watchGroupsForUser(uid).listen(
@@ -148,9 +149,18 @@ class SplitProvider extends ChangeNotifier {
   /// cached for each group, keeping the current selection stable where
   /// possible.
   void _rebuildGroups() {
-    final merged = _groupMeta
-        .map((g) => g.copyWith(expenses: _expensesByGroup[g.id] ?? const []))
-        .toList();
+    final merged = _groupMeta.map((g) {
+      final list = _expensesByGroup[g.id] ?? [];
+      // Sort by timestamp if available, otherwise fallback to ID
+      final sorted = List<Expense>.from(list)
+        ..sort((a, b) {
+          if (a.createdAt != null && b.createdAt != null) {
+            return a.createdAt!.compareTo(b.createdAt!);
+          }
+          return a.id.compareTo(b.id);
+        });
+      return g.copyWith(expenses: sorted);
+    }).toList();
 
     merged.sort((a, b) {
       final aOwned = a.ownerId == _uid;
@@ -276,7 +286,7 @@ class SplitProvider extends ChangeNotifier {
     );
 
     final group = Group(
-      id: FirestoreRepository.instance.newGroupId(),
+      id: 'personal_$uid', // Deterministic ID prevents duplicate creation
       name: 'My Expenses',
       isPersonal: true,
       ownerId: uid,
@@ -297,6 +307,7 @@ class SplitProvider extends ChangeNotifier {
     final idx = _groupMeta.indexWhere((g) => g.id == groupId);
     if (idx == -1) return;
     if (_groupMeta[idx].ownerId != _uid) return; // not the creator
+    if (_groupMeta[idx].isPersonal) return; // Protect personal group from deletion
 
     _groupMeta = [..._groupMeta]..removeAt(idx);
     _rebuildGroups();
@@ -497,6 +508,7 @@ class SplitProvider extends ChangeNotifier {
       splitMap: finalSplitMap,
       isSettlement: isSettlement,
       addedBy: _uid,
+      createdAt: DateTime.now(),
     );
 
     _expensesByGroup[group.id] = [...expenses, newExpense];
@@ -560,6 +572,7 @@ class SplitProvider extends ChangeNotifier {
       splitMap: {toId: amount},
       isSettlement: true,
       addedBy: _uid,
+      createdAt: DateTime.now(),
     );
 
     _expensesByGroup[group.id] = [

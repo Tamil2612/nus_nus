@@ -34,7 +34,7 @@ class Person {
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
-        'color': color.value,
+        'color': color.toARGB32(),
         'archived': archived,
         'linkedUserId': linkedUserId,
       };

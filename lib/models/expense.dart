@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Expense {
   /// Firestore document id within the group's `expenses` subcollection.
   final String id;
@@ -11,6 +13,7 @@ class Expense {
   /// one, not just the creator, so this is what "Added by X" is built
   /// from. Null for expenses written before this field existed.
   final String? addedBy;
+  final DateTime? createdAt;
 
   Expense({
     required this.id,
@@ -20,6 +23,7 @@ class Expense {
     required this.splitMap,
     this.isSettlement = false,
     this.addedBy,
+    this.createdAt,
   });
 
   List<int> get splitWith => splitMap.keys.toList();
@@ -30,6 +34,7 @@ class Expense {
     int? payerId,
     Map<int, double>? splitMap,
     bool? isSettlement,
+    DateTime? createdAt,
   }) {
     return Expense(
       id: id,
@@ -39,6 +44,7 @@ class Expense {
       splitMap: splitMap ?? this.splitMap,
       isSettlement: isSettlement ?? this.isSettlement,
       addedBy: addedBy,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
@@ -51,6 +57,7 @@ class Expense {
         'splitMap': splitMap.map((k, v) => MapEntry(k.toString(), v)),
         'isSettlement': isSettlement,
         'addedBy': addedBy,
+        'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
       };
 
   /// [id] is passed separately rather than read from [json] because it
@@ -66,5 +73,6 @@ class Expense {
         ),
         isSettlement: json['isSettlement'] as bool? ?? false,
         addedBy: json['addedBy'] as String?,
+        createdAt: json['createdAt'] != null ? (json['createdAt'] as Timestamp).toDate() : null,
       );
 }
