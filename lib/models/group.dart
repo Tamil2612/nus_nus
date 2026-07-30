@@ -8,6 +8,7 @@ class Group {
   final String id;
   final String name;
   final String currency;
+  final bool isPersonal;
 
   /// Uid of the account that created this group. The creator is the only
   /// one who can rename/delete the group, manage its member list, edit or
@@ -38,6 +39,7 @@ class Group {
     required this.name,
     required this.ownerId,
     this.currency = 'AED',
+    this.isPersonal = false,
     this.ownerName = '',
     this.members = const [],
     this.expenses = const [],
@@ -61,6 +63,7 @@ class Group {
   Group copyWith({
     String? name,
     String? currency,
+    bool? isPersonal,
     List<Person>? members,
     List<Expense>? expenses,
   }) {
@@ -68,6 +71,7 @@ class Group {
       id: id,
       name: name ?? this.name,
       currency: currency ?? this.currency,
+      isPersonal: isPersonal ?? this.isPersonal,
       ownerId: ownerId,
       ownerName: ownerName,
       members: members ?? this.members,
@@ -80,6 +84,7 @@ class Group {
   Map<String, dynamic> toJson() => {
         'name': name,
         'currency': currency,
+        'isPersonal': isPersonal,
         'ownerId': ownerId,
         'ownerName': ownerName,
         'memberUids': memberUids,
@@ -94,6 +99,7 @@ class Group {
         id: id,
         name: json['name'] as String? ?? 'Untitled group',
         currency: json['currency'] as String? ?? 'AED',
+        isPersonal: json['isPersonal'] as bool? ?? false,
         ownerId: json['ownerId'] as String? ?? '',
         ownerName: json['ownerName'] as String? ?? '',
         members: (json['members'] as List? ?? [])

@@ -303,7 +303,7 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
                     padding: EdgeInsets.symmetric(vertical: 12.h),
                   ),
                   child: _isSettling 
-                    ? SizedBox(height: 16.r, width: 16.r, child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? 16.verticalSpace
                     : Text('SETTLE ALL DUES WITH ${entry.name.toUpperCase()}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.sp)),
                 ),
               ),

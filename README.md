@@ -1,4 +1,4 @@
-# Nus·Nus (نسنس)
+# Nus·Nus (نص نص)
 
 **Nus·Nus** (meaning "half-half") is a premium, localized expense-splitting application designed for ultimate clarity and transparency. Built with Flutter and Firebase, it combines a professional "Digital Receipt" aesthetic with cutting-edge AI to make managing shared finances effortless.
 
@@ -8,7 +8,7 @@
 
 ### 1. **Nus Ai (Multimodal Bill Parsing)**
 - **Vision Intelligence**: Powered by **Gemini 1.5 Flash**, Nus Ai can "read" your receipt photos directly.
-- **Natural Language Splitting**: Simply describe the split (e.g., *"Vivek paid. Split everything except the coffee evenly. I had the coffee."*) and let the AI do the math.
+- **Natural Language Splitting**: Simply describe the split (e.g., *"Person A paid. Split everything except the coffee evenly. I had the coffee."*) and let the AI do the math.
 - **Context-Aware**: The AI automatically identifies your group members and maps the split to the correct people.
 
 ### 2. **Dynamic Multi-Currency Support**

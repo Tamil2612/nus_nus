@@ -208,7 +208,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
                     'Amount (${provider.currentGroup?.currency ?? 'AED'})'),
               ),
             ),
-            const SizedBox(width: 8),
+            8.horizontalSpace,
             Expanded(
               child: DropdownButtonFormField<int>(
                 value: _payerId,
@@ -378,6 +378,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
                               color: AppColors.ink,
                               fontSize: 13.sp,
                               fontWeight: FontWeight.w500))),
+                  120.horizontalSpace,
                   SizedBox(
                     width: 120.w,
                     child: TextField(

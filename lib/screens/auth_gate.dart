@@ -4,7 +4,7 @@ import '../providers/auth_provider.dart';
 import '../providers/split_provider.dart';
 import '../widgets/branded_loader.dart';
 import 'auth/login_screen.dart';
-import 'split_home_screen.dart';
+import 'landing_screen.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -34,7 +34,7 @@ class AuthGate extends StatelessWidget {
       child = const BrandedLoader(message: 'Getting your groups ready…');
       key = 'loading';
     } else {
-      child = const SplitHomeScreen();
+      child = const LandingScreen();
       key = 'home';
     }
 

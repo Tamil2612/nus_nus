@@ -15,13 +15,17 @@ class GeminiAiService {
         );
 
   Future<Map<String, dynamic>?> parseBillWithVision({
-    required Uint8List imageBytes,
+    Uint8List? imageBytes,
     required String instructions,
     required List<String> memberNames,
   }) async {
+    final hasImage = imageBytes != null && imageBytes.isNotEmpty;
+    
     final prompt = '''
 You are a highly accurate financial calculation engine for the Nus·Nus app.
-Your mission is to parse the provided receipt image and apply the user's specific split instructions.
+Your mission is to ${hasImage ? 'parse the provided receipt image and ' : ''}apply the user's specific split instructions.
+
+${!hasImage ? 'IMPORTANT: No image was provided. Rely ENTIRELY on the instructions below to extract the description, total amount, and split details.' : ''}
 
 ---
 USER INSTRUCTIONS: $instructions
@@ -37,16 +41,16 @@ STRICT CALCULATION RULES:
 6. MEMBER MAPPING: Only use names provided in the MEMBER LIST.
 
 EXAMPLE 1 (Exclusion):
-Instructions: "Total 100. Vivek paid. Split between all except Pushpa."
-Result: {"description": "...", "amount": 100, "payerName": "Vivek", "splitMap": {"Vivek": 50, "Vivek2": 50}}
+Instructions: "Total 100. Person A paid. Split between all except Person B."
+Result: {"description": "...", "amount": 100, "payerName": "Person A", "splitMap": {"Person A": 50, "Person C": 50}}
 
 EXAMPLE 2 (Percentage):
-Instructions: "Total 200. I paid. Pushpa owes 25%."
-Result: {"description": "...", "amount": 200, "payerName": "You", "splitMap": {"You": 150, "Pushpa": 50}}
+Instructions: "Total 200. I paid. Person B owes 25%."
+Result: {"description": "...", "amount": 200, "payerName": "You", "splitMap": {"You": 150, "Person B": 50}}
 
 EXAMPLE 3 (Specific Items):
-Instructions: "The pizza was 60, split it between Vivek and Pushpa. I had the 20 drink."
-Result: {"description": "...", "amount": 80, "payerName": "...", "splitMap": {"Vivek": 30, "Pushpa": 30, "You": 20}}
+Instructions: "The pizza was 60, split it between Person A and Person B. I had the 20 drink."
+Result: {"description": "...", "amount": 80, "payerName": "...", "splitMap": {"Person A": 30, "Person B": 30, "You": 20}}
 
 RESPONSE FORMAT:
 ONLY return a valid JSON object. No conversation, no markdown code blocks.
@@ -62,11 +66,14 @@ JSON Schema:
 }
 ''';
 
-    final content = [
-      Content.multi([
-        DataPart('image/jpeg', imageBytes),
-        TextPart(prompt),
-      ])
+    final List<Content> content = [
+      if (hasImage)
+        Content.multi([
+          DataPart('image/jpeg', imageBytes),
+          TextPart(prompt),
+        ])
+      else
+        Content.text(prompt)
     ];
 
     try {
@@ -110,6 +117,39 @@ JSON Schema:
         rethrow;
       }
       return null;
+    }
+  }
+
+  Future<String?> queryAppState({
+    required String userQuery,
+    required String appContext,
+  }) async {
+    final prompt = '''
+You are "Nus AI", a professional financial analyst for the Nus·Nus app. 
+You have access to the user's entire spending history and group balances across the app.
+
+USER'S DATA CONTEXT (JSON):
+$appContext
+
+USER'S QUESTION:
+$userQuery
+
+STRICT GUIDELINES:
+1. Accuracy: Only use the data provided in the JSON context. If the answer isn't there, say you don't have that information.
+2. Conciseness: Be helpful but brief. Use bullet points for lists.
+3. Currency: Always specify the currency when mentioning amounts.
+4. Privacy: Do not mention internal IDs, only names.
+5. Persona: Be friendly, intelligent, and helpful.
+
+Answer the user's question now:
+''';
+
+    try {
+      final response = await _model.generateContent([Content.text(prompt)]);
+      return response.text;
+    } catch (e) {
+      print('Gemini Query Error: $e');
+      return "I'm having trouble accessing your data right now. Please try again in a moment.";
     }
   }
 }

@@ -1,38 +1,43 @@
-# Implementation Plan: Soft-Removal of Group Members
+# Implementation Plan: Full-App AI Financial Assistant
 
-Implement a feature to allow group owners to remove members from a group using a "soft-delete" approach (archiving). This ensures that historical expense data remains accurate while hiding removed members from current pickers and the active roster.
-
-## User Review Required
-
-> [!NOTE]
-> Members with expense history will be **archived** (hidden from new expenses but kept for history), while members with no history will be fully removed from the group document.
+Transform the AI experience from a specialized bill-splitter into a comprehensive financial assistant that can answer questions about your entire spending history across all groups.
 
 ## Proposed Changes
 
+### [Component] GeminiAiService
+#### [MODIFY] [gemini_ai_service.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/services/gemini_ai_service.dart)
+- **New Method: `queryAppState`**:
+  - Accepts a `userQuery` and a `compactAppState` string.
+  - **System Prompt**: Defines the AI as a "Financial Data Analyst". Instructs it to parse the provided context (all groups/expenses) and answer the user's question accurately.
+  - **Context Handling**: Gemini 3.6 Flash's large context window allows us to send a summary of all recent expenses and group standings.
+
 ### [Component] SplitProvider
 #### [MODIFY] [split_provider.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/providers/split_provider.dart)
-- The existing `removePerson(int id)` method already implements the archiving logic. No functional changes needed here, but I will double-check its integrity.
+- **AI Context Getter**: Implement `getAiSummaryContext()`.
+  - Generates a compact JSON string representing all groups, total spends, and individual expense descriptions/amounts for the current user.
+  - Filters out sensitive data (UIDs) but keeps names and amounts.
 
-### [Component] LedgerTab (UI)
-#### [MODIFY] [ledger_tab.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/widgets/ledger_tab.dart)
-- **`_confirmRemovePerson`**: Add a private helper method to show a confirmation dialog before removal, explaining the difference between full removal and archiving (as previously requested).
-- **`_GroupRoster`**:
-  - Add an `onRemove` callback: `Function(Person)? onRemove`.
-  - Update the member chips to include a small delete icon (visible only to the owner).
-  - Tapping the delete icon will trigger the `_confirmRemovePerson` dialog.
-- **`LedgerTab` State**: Pass the new removal logic to the `_GroupRoster` widget.
+### [Component] AI Expense Screen (UI Overhaul)
+#### [MODIFY] [ai_expense_screen.dart](file:///home/tamizharasan/flutterProjects/nus_nus_updated/lib/screens/ai_expense_screen.dart)
+- **Dual-Mode Layout**:
+  - Add a "Segmented Control" or "Custom Toggle" at the top: **[SPLIT BILL]** | **[ASK ANYTHING]**.
+- **Split Bill Mode**: Retains the current receipt upload and prompt logic.
+- **Ask Anything Mode**:
+  - A clean, dedicated chat interface.
+  - Features suggested questions (e.g., *"How much did I spend this month?"*, *"Who owes me the most?"*, *"Which group is most active?"*).
+  - Integration with the new `queryAppState` method.
+
+### [Component] New Widgets
+#### [NEW] `ai_chat_view.dart`
+- A dedicated chat-history widget for the "Ask Anything" mode.
+- Reuses the `TypingIndicator` and chat bubble styles from previous iterations.
 
 ## Verification Plan
 
 ### Manual Verification
-1. **Remove Member with History**:
-   - Add an expense involving Member A.
-   - Attempt to remove Member A.
-   - Verify the dialog warns that they have history and will be "hidden" but kept for records.
-   - Confirm and verify they no longer appear in the "MEMBERS" list or new expense pickers.
-2. **Remove Member without History**:
-   - Add Member B.
-   - Attempt to remove Member B immediately.
-   - Verify the dialog simply asks to remove them completely.
-   - Confirm and verify they are gone from the group.
-3. **Owner Check**: Verify that a non-owner member cannot see the remove icons.
+1. **Split Mode**: Verify that uploading a receipt still works perfectly.
+2. **Ask Mode**:
+   - Ask: *"What is my total spending across all groups?"* -> Verify the AI calculates the sum correctly.
+   - Ask: *"Did I buy coffee recently?"* -> Verify the AI finds relevant expense descriptions.
+   - Ask: *"Who owes me money in the [Group Name] group?"* -> Verify it matches the Balances tab.
+3. **Toggle Stability**: Ensure switching between modes doesn't lose current state (like a selected image).

@@ -3,32 +3,34 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
+import '../utils/currency_formatter.dart';
 
 class HeaderBar extends StatelessWidget {
-  final double totalSpent;
-  final int tabIndex;
-
-  const HeaderBar({super.key, required this.totalSpent, this.tabIndex = 0});
+  const HeaderBar({super.key});
 
   @override
   Widget build(BuildContext context) {
     context.watch<SplitProvider>();
     return Padding(
-      padding: EdgeInsets.fromLTRB(4.w, 16.h, 20.w, 8.h),
+      padding: EdgeInsets.fromLTRB(5.w, 16.h, 4.w, 8.h),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           InkWell(
             onTap: () => Scaffold.of(context).openDrawer(),
             child: Padding(
-              padding:  EdgeInsets.symmetric(horizontal: 8.w),
-              child: Image.asset('assets/icon/menu.png', width: 28.w,color: AppColors.paper,),
+              padding: EdgeInsets.symmetric(horizontal: 8.w),
+              child: Image.asset(
+                'assets/icon/menu.png',
+                width: 28.w,
+                color: AppColors.paper,
+              ),
             ),
           ),
           8.horizontalSpace,
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
                 RichText(
@@ -47,13 +49,23 @@ class HeaderBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                Text(
-                  'Split the bill.',
-                  style: TextStyle(fontSize: 11.sp, color: AppColors.slate),
+                12.horizontalSpace,
+                Padding(
+                  padding: EdgeInsets.only(top: 4.h), // Optical baseline adjustment
+                  child: Text(
+                    'نص نص',
+                    style: TextStyle(
+                      fontSize: 16.sp,
+                      color: AppColors.brassSoft,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
+          12.horizontalSpace,
         ],
       ),
     );

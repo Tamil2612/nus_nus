@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../data/firestore_repository.dart';
 import '../data/member_directory_repository.dart';
@@ -79,7 +80,10 @@ class SplitProvider extends ChangeNotifier {
     });
 
     _groupsSub = FirestoreRepository.instance.watchGroupsForUser(uid).listen(
-      (loaded) => _onGroupMetaUpdated(loaded),
+      (loaded) {
+        _onGroupMetaUpdated(loaded);
+        _ensurePersonalGroupExists(uid, loaded);
+      },
       onError: (_) {
         // Don't leave the user staring at a spinner forever if the
         // stream errors out (e.g. offline, permission issue) — fall back
@@ -175,10 +179,26 @@ class SplitProvider extends ChangeNotifier {
   }
 
   List<Group> get groups => List.unmodifiable(_groups);
+  
+  Group? get personalGroup {
+    try {
+      return _groups.firstWhere((g) => g.isPersonal && g.ownerId == _uid);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<Group> get sharedGroups =>
+      _groups.where((g) => !g.isPersonal).toList();
+
   List<Group> get ownedGroups =>
+      _groups.where((g) => g.ownerId == _uid && !g.isPersonal).toList();
+
+  List<Group> get allOwnedGroups =>
       _groups.where((g) => g.ownerId == _uid).toList();
+  
   List<Group> get linkedGroups =>
-      _groups.where((g) => g.ownerId != _uid).toList();
+      _groups.where((g) => g.ownerId != _uid && !g.isPersonal).toList();
 
   Group? get currentGroup {
     if (_currentGroupId == null) return null;
@@ -237,6 +257,35 @@ class SplitProvider extends ChangeNotifier {
     _rebuildGroups();
     _currentGroupId = group.id;
     notifyListeners();
+    FirestoreRepository.instance.saveGroupMeta(group);
+  }
+
+  void _ensurePersonalGroupExists(String uid, List<Group> loaded) {
+    if (loaded.any((g) => g.isPersonal && g.ownerId == uid)) return;
+
+    final resolvedOwnerName =
+        (_myDisplayName != null && _myDisplayName!.isNotEmpty)
+            ? _myDisplayName!
+            : 'You';
+
+    final me = Person(
+      id: 1,
+      name: resolvedOwnerName,
+      color: AppColors.avatarColorFor(0),
+      linkedUserId: uid,
+    );
+
+    final group = Group(
+      id: FirestoreRepository.instance.newGroupId(),
+      name: 'My Expenses',
+      isPersonal: true,
+      ownerId: uid,
+      ownerName: resolvedOwnerName,
+      members: [me],
+      expenses: const [],
+    );
+    // Don't need to add to local _groupMeta yet, the stream will catch it
+    // after Firestore write.
     FirestoreRepository.instance.saveGroupMeta(group);
   }
 
@@ -597,8 +646,7 @@ class SplitProvider extends ChangeNotifier {
       SettlementCalculator.deriveLedgerEntries(expenses);
 
   /// The net debt between every pair of people who have ever transacted in
-  /// this group — this is the "who specifically owes whom" detail (e.g.
-  /// "Tamilarasan is owed: Pushpa AED 15.50, Nivetha AED 48.60") that a
+  /// this group — this is the "who specifically owes whom" detail that a
   /// flat net-balance map can't express.
   List<PairBalance> get pairBalances =>
       SettlementCalculator.computePairBalances(ledgerEntries);
@@ -813,3 +861,41 @@ class OverallBalance {
     return maxAbs;
   }
 }
+
+extension AiContextExtension on SplitProvider {
+  /// Generates a structured summary of all spending data across all groups.
+  /// This is used as context for the "Ask Anything" AI feature.
+  String getAiSummaryContext() {
+    final Map<String, dynamic> context = {
+      'user': _myDisplayName ?? 'Me',
+      'groups': groups.map((g) {
+        return {
+          'name': g.name,
+          'currency': g.currency,
+          'isPersonal': g.isPersonal,
+          'totalSpentInGroup': g.expenses
+              .where((e) => !e.isSettlement)
+              .fold(0.0, (s, e) => s + e.amount),
+          'members': g.members.map((m) => m.name).toList(),
+          'recentExpenses': g.expenses
+              .where((e) => !e.isSettlement)
+              .take(10)
+              .map((e) => {
+                    'desc': e.desc,
+                    'amount': e.amount,
+                    'paidBy': g.members
+                        .firstWhere((m) => m.id == e.payerId,
+                            orElse: () => Person(id: 0, name: '?', color: Colors.grey))
+                        .name,
+                  })
+              .toList(),
+        };
+      }).toList(),
+      'globalNetStandings': globalNetStandings,
+    };
+
+    return JsonEncoder.withIndent('  ').convert(context);
+  }
+}
+
+

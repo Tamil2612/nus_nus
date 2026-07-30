@@ -1,5 +1,5 @@
-- [x] Implement member removal UI in `LedgerTab`
-    - [x] Add `_confirmRemovePerson` dialog logic
-    - [x] Update `_GroupRoster` to show delete icons for owners
-    - [x] Connect removal logic to `SplitProvider`
-- [x] Verify functionality
+- [x] Fix "Ask Anything" input visibility
+    - [x] Create `AiInputFooter` with dynamic chat/analyse modes
+    - [x] Update `AiExpenseScreen` to use new footer
+    - [x] Delete obsolete `BottomActionBar`
+- [x] Verify chat input on "Ask Anything" mode
