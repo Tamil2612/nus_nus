@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "nus-nus"
-  }
+    "default": "nus-nus",
+    "backend": "nus-nus"
+  },
+  "targets": {},
+  "etags": {}
 }
