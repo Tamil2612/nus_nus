@@ -1,46 +1,115 @@
 # Nus·Nus (نص نص)
 
-**Nus·Nus** (meaning "half-half") is a premium, localized expense-splitting application designed for ultimate clarity and transparency. Built with Flutter and Firebase, it combines a professional "Digital Receipt" aesthetic with cutting-edge AI to make managing shared finances effortless.
+**Nus·Nus** (Arabic for *"Half-Half"*) is a smart, localized expense-splitting application designed for maximum clarity, fairness, and transparency. Built with **Flutter** and **Firebase Cloud Functions**, it combines a modern digital receipt aesthetic with **Gemini AI** to make split tabs and shared group expenses completely effortless.
 
 ---
 
 ## 🌟 Key Features
 
-### 1. **Nus Ai (Multimodal Bill Parsing)**
-- **Vision Intelligence**: Powered by **Gemini 3.6 Flash**, Nus Ai can "read" your receipt photos directly.
-- **Natural Language Splitting**: Simply describe the split (e.g., *"Person A paid. Split everything except the coffee evenly. I had the coffee."*) and let the AI do the math.
-- **Context-Aware**: The AI automatically identifies your group members and maps the split to the correct people.
+### 1. 🤖 **Gemini AI Powered Assistance (`Nus AI`)**
+* **Multimodal Receipt Scanning**: Upload a photo of any receipt or bill. Gemini AI automatically extracts line items, totals, tax/fees distribution, and payer details.
+* **Natural Language Split Prompts**: Type custom split instructions in plain English or Arabic (e.g., *"Total 150 AED. Rahul paid. Split evenly between everyone except Sarah who didn't order drinks"*).
+* **"Ask Anything" App State AI Chat**: Ask questions directly about your groups and balances (e.g., *"How much do I owe across all my trips?"* or *"Who spent the most on dinner last night?"*).
 
-### 2. **Dynamic Multi-Currency Support**
-- **Per-Group Currency**: Create different groups for different regions (e.g., "Dubai Trip" in **AED**, "USA Trip" in **USD**).
-- **Intelligent Formatting**: The app automatically applies the correct symbols and regional formatting across all screens.
-- **Aggregated View**: Your global standings are tracked separately per currency to ensure 100% accuracy.
+### 2. 🧮 **Automated Settlement & Pairwise Debt Minimization**
+* **Algorithmic Debt Optimization**: Built-in settlement calculator resolves complex multi-person group debts down to the minimal possible number of transfer transactions.
+* **Creditor-Gated Settlement System**: For maximum trust, only the person **owed money** (the creditor) can officially record or confirm a settlement.
+* **Transparent Ledger Flow**: View detailed pairwise breakdowns (`You owe Person A: 45 AED`, `Person B owes You: 90 AED`) with real-time balance calculations.
 
-### 3. **Unique "Split-Ticket" Activity Feed**
-- **Professional Layout**: A chronologically reversed feed where every expense is displayed as a stylized digital "tab" or ticket.
-- **Visual Hierarchy**: Immediate clarity on who paid, how much was spent, and who is participating in the split.
-
-### 4. **"People" Dashboard**
-- **Pairwise Standing**: A dedicated tab that aggregates all your debts and credits across every group you participate in.
-- **Directional Flow**: Clear visual indicators show exactly who owes whom (e.g., `YOU <- AED 50 <- RAHUL`).
-- **One-Tap Global Settle**: Resolve all shared dues with a specific person across all groups with a single click.
-
-### 5. **Secure & Fair Logic**
-- **Creditor-Only Settlement**: To ensure honesty, only the person who is **owed money** can officially confirm and record a settlement.
-- **Creator Controls**: The person who adds a split has full administrative control to edit or delete it.
-- **Soft-Deletion**: Members with history are archived rather than deleted, preserving historical balance accuracy.
+### 3. 💳 **Digital Receipt Feed & Group Management**
+* **Ticket-Style Activity Feed**: Expenses are styled as sleek, chronological digital "tabs" showing exact split maps, timestamps, and participant tags.
+* **Multi-Group & Multi-Currency**: Manage separate groups for trips, households, or events (e.g., AED for Dubai, USD for US trip, EUR for Euro trip) with isolated balances per currency.
+* **Flexible Member Management**: Add group members dynamically with real-time sync across all connected devices.
 
 ---
 
-## 🛠️ Technical Stack
-- **Frontend**: Flutter (3.x) with Provider for state management.
-- **Backend**: Firebase (Firestore for real-time sync, Auth for secure login).
-- **Intelligence**: Firebase AI Logic SDK (Gemini 3.6 Flash).
-- **Security**: Firebase App Check for API protection.
-- **Distribution**: PWA-ready for instant iOS and Android home screen installation.
+## 🏗️ Architecture & Technology Stack
+
+```
+   ┌─────────────────────────────────────────────────────────┐
+   │             Flutter Cross-Platform Frontend             │
+   │  (iOS, Android, Web, macOS, Windows with ScreenUtil)    │
+   └──────────────────────────┬──────────────────────────────┘
+                              │
+            ┌─────────────────┴─────────────────┐
+            ▼                                   ▼
+┌─────────────────────────┐         ┌─────────────────────────┐
+│   Firebase Firestore    │         │ Firebase Cloud Functions│
+│  (Real-Time DB Sync &   │         │ (Node.js Serverless AI  │
+│     Authentication)     │         │ & Gemini 3.6 Flash SDK) │
+└─────────────────────────┘         └─────────────────────────┘
+```
+
+* **Frontend**: [Flutter](https://flutter.dev) (Dart) with `Provider` state management, `flutter_screenutil` responsive scaling, and `Google Fonts`.
+* **Backend**: [Firebase Cloud Functions](https://firebase.google.com/docs/functions) (Node.js) for serverless AI operations and backend validation.
+* **Database & Auth**: [Cloud Firestore](https://firebase.google.com/docs/firestore) real-time streams & [Firebase Auth](https://firebase.google.com/docs/auth).
+* **Artificial Intelligence**: [Google Gemini AI](https://deepmind.google/technologies/gemini/) (`gemini-3.6-flash`) via the Google Generative AI SDK.
+* **CI/CD Pipeline**: GitHub Actions for automated Flutter Web builds and Firebase Hosting deployment.
 
 ---
 
-## 🔒 Security Rules
+## 📁 Repository Structure
 
-The application enforces strict data isolation and permission checks via Firestore Security Rules. These ensure that users can only view groups they are members of and only edit data they have created. (See `firestore.rules` for full technical definitions).
+```
+nus_nus/
+├── lib/
+│   ├── models/            # Data models (Expense, Group, AppUser, LedgerEntry)
+│   ├── providers/         # State management (SplitProvider)
+│   ├── screens/           # UI screens (Home, AI Expense, Group Detail, Auth)
+│   ├── services/          # Firebase & Gemini AI integrations (GeminiAiService)
+│   ├── theme/             # Custom design tokens and color palettes
+│   ├── utils/             # Settlement calculator engine & formatters
+│   └── widgets/           # Modular UI components (Receipt Cards, Chat Views)
+├── functions/             # Firebase Cloud Functions backend (Node.js)
+│   ├── index.js           # Serverless AI endpoints (parseBillWithAI, queryAppState)
+│   └── package.json       # Backend dependencies
+├── .github/workflows/     # GitHub Actions CI/CD for Firebase Hosting
+├── firebase.json          # Firebase deployment configuration
+├── firestore.rules        # Firestore security rules
+└── pubspec.yaml           # Flutter dependencies
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+* [Flutter SDK](https://docs.flutter.dev/get-started/install) (`>= 3.0.0`)
+* [Node.js](https://nodejs.org/) (`v20+`) & npm
+* [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`)
+
+### 1. Clone & Install Flutter Dependencies
+```bash
+git clone https://github.com/Tamil2612/nus_nus.git
+cd nus_nus
+flutter pub get
+```
+
+### 2. Run the App
+```bash
+# Run on Chrome Web
+flutter run -d chrome
+
+# Run on Android / iOS
+flutter run
+```
+
+---
+
+## ☁️ Deploying Firebase Cloud Functions
+
+1. Navigate to the `functions` directory and set your Gemini API key in `functions/.env`:
+   ```env
+   GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+   ```
+
+2. Deploy Cloud Functions to Firebase:
+   ```bash
+   npx firebase-tools deploy --only functions
+   ```
+
+---
+
+## 🔒 Security & Privacy
+* **API Key Protection**: Gemini AI API keys are stored securely in backend serverless environment variables (`functions/.env`), preventing exposure inside client app builds.
+* **Firestore Security Rules**: User data access is strictly bounded by group membership and authentication tokens (`firestore.rules`).
