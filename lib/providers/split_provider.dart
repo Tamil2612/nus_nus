@@ -616,97 +616,32 @@ class SplitProvider extends ChangeNotifier {
     if (!amount.isFinite || amount <= 0 || fromId == toId) {
       return 'Enter a valid settlement amount.';
     }
-
     Group? group;
-    for (final g in _groups) {
-      if (g.id == targetId) {
-        group = g;
-        break;
-      }
-    }
+    for (final g in _groups) { if (g.id == targetId) { group = g; break; } }
     if (group == null) return 'Could not find that group.';
-
-    if (!group.memberUids.contains(_uid)) {
-      return "You're not a member of this group.";
-    }
-
+    if (!group.memberUids.contains(_uid)) return "You're not a member of this group.";
     Person? fromPerson;
     Person? toPerson;
-    for (final p in group.members) {
-      if (p.id == fromId) fromPerson = p;
-      if (p.id == toId) toPerson = p;
+    for (final p in group.members) { if (p.id == fromId) fromPerson = p; if (p.id == toId) toPerson = p; }
+    if (fromPerson == null || toPerson == null) return 'Could not find one of the people in this settlement.';
+    // Either linked account in the debtor-creditor pair may record settlement.
+    if (fromPerson.linkedUserId != _uid && toPerson.linkedUserId != _uid) {
+      return 'Only someone in this debtor-creditor pair can confirm settlement.';
     }
-    if (fromPerson == null || toPerson == null) {
-      return 'Could not find one of the people in this settlement.';
+    final pair = SettlementCalculator.computePairBalances(
+      SettlementCalculator.deriveLedgerEntries(_expensesByGroup[group.id] ?? const <Expense>[]),
+    ).where((balance) =>
+      (balance.personAId == fromId && balance.personBId == toId) ||
+      (balance.personAId == toId && balance.personBId == fromId),
+    ).toList();
+    if (pair.isEmpty || pair.first.debtorId != fromId || pair.first.creditorId != toId) {
+      return 'The debt direction changed. Refresh and try again.';
     }
-
-    // Permission check: group owner, debtor, or creditor can confirm settlement
-    final isOwner = group.ownerId == _uid;
-    final isDebtor = fromPerson.linkedUserId == _uid;
-    final isCreditor = toPerson.linkedUserId == _uid;
-    if (!isOwner && !isDebtor && !isCreditor) {
-      return 'Only the debtor, creditor, or group creator can confirm this settlement.';
-    }
-
-    // Settlement status is all-or-nothing per expense share. Never let a
-    // stale or arbitrary amount clear a different balance than the one shown
-    // to the user. The pairwise balance already nets debts in both directions.
-    final current = _expensesByGroup[group.id] ?? const <Expense>[];
-    PairBalance? pairBalance;
-    for (final balance in SettlementCalculator.computePairBalances(
-      SettlementCalculator.deriveLedgerEntries(current),
-    )) {
-      if ((balance.personAId == fromId && balance.personBId == toId) ||
-          (balance.personAId == toId && balance.personBId == fromId)) {
-        pairBalance = balance;
-        break;
-      }
-    }
-
-    if (pairBalance == null || pairBalance.debtorId == null || pairBalance.creditorId == null) {
-      return 'No outstanding balance found between these members.';
-    }
-
-    final actualFromId = pairBalance.debtorId!;
-    final actualToId = pairBalance.creditorId!;
-
-    if ((pairBalance.owedAmount - amount).abs() >= 0.01) {
-      return 'The outstanding balance changed. Refresh and try again.';
-    }
-
-    final updatedList = <Expense>[];
-    final changed = <Expense>[];
-    for (final e in current) {
-      Set<int>? newSettled;
-      if (!e.isSettlement) {
-        if (e.payerId == actualToId &&
-            e.splitMap.containsKey(actualFromId) &&
-            !e.settledBy.contains(actualFromId)) {
-          newSettled = {...e.settledBy, actualFromId};
-        } else if (e.payerId == actualFromId &&
-            e.splitMap.containsKey(actualToId) &&
-            !e.settledBy.contains(actualToId)) {
-          newSettled = {...e.settledBy, actualToId};
-        }
-      }
-      if (newSettled != null) {
-        final updated = e.copyWith(settledBy: newSettled);
-        updatedList.add(updated);
-        changed.add(updated);
-      } else {
-        updatedList.add(e);
-      }
-    }
-
-    if (changed.isEmpty) return 'Nothing left to settle between them.';
-
-    _expensesByGroup[group.id] = updatedList;
-    _rebuildGroups();
-    notifyListeners();
-    for (final e in changed) {
-      _persist(FirestoreRepository.instance
-          .updateSettledBy(group.id, e.id, e.settledBy));
-    }
+    if (amount - pair.first.owedAmount > 0.005) return 'Settlement amount exceeds the current outstanding balance.';
+    // Server recomputes the net and atomically allocates this amount to existing shares.
+    _persist(FirestoreRepository.instance.recordPairSettlement(
+      groupId: group.id, fromId: fromId, toId: toId, amount: amount,
+    ));
     return null;
   }
 
