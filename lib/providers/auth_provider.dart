@@ -237,16 +237,21 @@ class AuthProvider extends ChangeNotifier {
       await _user?.reload();
       _user = _auth.currentUser;
 
-      // Update Firestore with the NEW email immediately so the app shows it
-      await MemberDirectoryRepository.instance.upsertProfile(
-        AppUser(
-          uid: _user!.uid,
-          name: _user!.displayName ?? '',
-          email: newEmail.trim(),
-          phoneNumber: _appUser?.phoneNumber,
-        ),
-      );
-      await _fetchAppUser(_user!.uid);
+      // verifyBeforeUpdateEmail sends a verification link; it does not
+      // immediately change FirebaseAuth's email. Keep the directory aligned
+      // with the currently verified Auth email until the user completes it.
+      final currentEmail = _user?.email;
+      if (currentEmail != null) {
+        await MemberDirectoryRepository.instance.upsertProfile(
+          AppUser(
+            uid: _user!.uid,
+            name: _user!.displayName ?? '',
+            email: currentEmail,
+            phoneNumber: _appUser?.phoneNumber,
+          ),
+        );
+        await _fetchAppUser(_user!.uid);
+      }
 
       _setBusy(false);
       return null;
