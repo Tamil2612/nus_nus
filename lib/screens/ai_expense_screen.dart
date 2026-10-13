@@ -47,6 +47,7 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
   void dispose() {
     promptController.dispose();
     _scrollController.dispose();
+    _chatScrollController.dispose();
     super.dispose();
   }
 
