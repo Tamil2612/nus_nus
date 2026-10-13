@@ -351,28 +351,43 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
         );
       }
 
-      let remaining = requestedCents;
-      const writes = [];
-      for (const doc of docs) {
-        if (remaining <= 0) break;
-        const expense = doc.data();
-        if (Number(expense.payerId) !== toId) continue;
-        const shareCents = outstandingFor(expense, fromId);
-        if (shareCents <= 0) continue;
-        const applyCents = Math.min(remaining, shareCents);
-        const rawAmounts = expense.settledAmounts || {};
-        const nextAmounts = { ...rawAmounts };
-        const previousCents = Math.round(Number(rawAmounts[String(fromId)] || 0) * 100);
-        nextAmounts[String(fromId)] = (previousCents + applyCents) / 100;
-        writes.push({ ref: doc.ref, settledAmounts: nextAmounts });
-        remaining -= applyCents;
-      }
-      if (remaining > 0) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'Could not allocate the full settlement to existing shares.'
-        );
-      }
+      // Opposing debts are netted first. If B owes A 100 and A owes B 40,
+      // then a net settlement of 60 reconciles B's full 100 share and A's
+      // 40 share, while only 60 represents the external amount paid.
+      const writesByPath = new Map();
+      const allocate = (payerId, debtorId, centsToAllocate) => {
+        let remaining = centsToAllocate;
+        for (const doc of docs) {
+          if (remaining <= 0) break;
+          const expense = doc.data();
+          if (Number(expense.payerId) !== payerId) continue;
+          const shareCents = outstandingFor(expense, debtorId);
+          if (shareCents <= 0) continue;
+          const applyCents = Math.min(remaining, shareCents);
+          const priorWrite = writesByPath.get(doc.ref.path);
+          const rawAmounts = priorWrite
+            ? priorWrite.settledAmounts
+            : (expense.settledAmounts || {});
+          const nextAmounts = { ...rawAmounts };
+          const previousCents = Math.round(Number(rawAmounts[String(debtorId)] || 0) * 100);
+          nextAmounts[String(debtorId)] = (previousCents + applyCents) / 100;
+          writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          remaining -= applyCents;
+        }
+        if (remaining > 0) {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'Could not allocate the full settlement to existing shares.'
+          );
+        }
+      };
+
+      // Reconcile all reverse-direction debt as an offset, then apply the
+      // user's actual settlement amount to the forward debt. This preserves
+      // the net balance after partial settlements and avoids fake payments.
+      allocate(fromId, toId, reverseCents);
+      allocate(toId, fromId, reverseCents + requestedCents);
+      const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
       }
