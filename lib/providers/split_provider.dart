@@ -626,10 +626,37 @@ class SplitProvider extends ChangeNotifier {
       return 'Only ${toPerson.name} or the group creator can settle this up.';
     }
 
+    // Settlement status is all-or-nothing per expense share. Never let a
+    // stale or arbitrary amount clear a different balance than the one shown
+    // to the user. The pairwise balance already nets debts in both directions.
     final current = _expensesByGroup[group.id] ?? const <Expense>[];
+    final pairBalance = SettlementCalculator.computePairBalances(
+      SettlementCalculator.deriveLedgerEntries(current),
+    ).where((balance) =>
+        (balance.debtorId == fromId && balance.creditorId == toId) ||
+        (balance.debtorId == toId && balance.creditorId == fromId))
+      .firstOrNull;
+
+    if (pairBalance == null ||
+        pairBalance.debtorId != fromId ||
+        pairBalance.creditorId != toId) {
+      return 'The balance direction has changed. Refresh and try again.';
+    }
+    if ((pairBalance.owedAmount - amount).abs() >= 0.01) {
+      return 'The outstanding balance changed. Refresh and try again.';
+    }
+
+    // Bulk settlement touches expenses in both directions so the net pair
+    // balance becomes zero. To keep Firestore permissions enforceable without
+    // a payment ledger, only the group owner may confirm this cross-expense
+    // operation; individual expense payers can still toggle their own shares.
+    if (!isOwner) {
+      return 'Only the group creator can confirm a balance settlement.';
+    }
+
     final updatedList = <Expense>[];
     final changed = <Expense>[];
-    for (final e in current) {
+    for (final e of current) {
       Set<int>? newSettled;
       if (!e.isSettlement) {
         if (e.payerId == toId &&
