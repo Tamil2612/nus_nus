@@ -10,13 +10,12 @@ class Group {
   final String currency;
   final bool isPersonal;
 
-  /// Uid of the account that created this group. The creator is the only
-  /// one who can rename/delete the group, manage its member list, edit or
-  /// delete an expense, or settle a balance up. Every other member linked
-  /// in (via a [Person.linkedUserId]) can see everything and can log new
-  /// expenses, but can't touch anyone else's — enforced both client-side
-  /// (UI hides the controls) and server-side (see the Firestore rules in
-  /// the repo).
+  /// Uid of the account that created this group. The creator manages
+  /// group metadata and membership. Expense details can be edited/deleted
+  /// by the expense logger or group owner, but only the original expense
+  /// logger can change per-person paid/pending flags. Either linked person
+  /// in a debtor-creditor pair can record an external settlement. These
+  /// permissions are enforced in the UI and Firestore/callable backend.
   final String ownerId;
 
   /// Display name of the owner, captured at creation time so every linked
