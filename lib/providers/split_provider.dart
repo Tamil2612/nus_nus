@@ -67,6 +67,7 @@ class SplitProvider extends ChangeNotifier {
   }
 
   String? get uid => _uid;
+
   bool get isLoading => _isLoading;
 
   /// Called by [AuthGate] whenever the signed-in user changes. Subscribes
@@ -270,7 +271,8 @@ class SplitProvider extends ChangeNotifier {
     // read straight off FirebaseAuth, which can lag behind) is only used
     // as a stand-in for the rare case the directory lookup hasn't
     // resolved yet.
-    final resolvedOwnerName = (_myDisplayName != null && _myDisplayName!.isNotEmpty)
+    final resolvedOwnerName = (_myDisplayName != null &&
+        _myDisplayName!.isNotEmpty)
         ? _myDisplayName!
         : (ownerName ?? '');
 
@@ -287,7 +289,9 @@ class SplitProvider extends ChangeNotifier {
 
     final group = Group(
       id: FirestoreRepository.instance.newGroupId(),
-      name: name.trim().isEmpty ? 'New Group' : name.trim(),
+      name: name
+          .trim()
+          .isEmpty ? 'New Group' : name.trim(),
       currency: currency,
       ownerId: uid,
       ownerName: resolvedOwnerName,
@@ -319,7 +323,8 @@ class SplitProvider extends ChangeNotifier {
     );
 
     final group = Group(
-      id: 'personal_$uid', // Deterministic ID prevents duplicate creation
+      id: 'personal_$uid',
+      // Deterministic ID prevents duplicate creation
       name: 'My Expenses',
       isPersonal: true,
       ownerId: uid,
@@ -342,7 +347,9 @@ class SplitProvider extends ChangeNotifier {
     final idx = _groupMeta.indexWhere((g) => g.id == groupId);
     if (idx == -1) return;
     if (_groupMeta[idx].ownerId != _uid) return; // not the creator
-    if (_groupMeta[idx].isPersonal) return; // Protect personal group from deletion
+    if (_groupMeta[idx].isPersonal) {
+      return; // Protect personal group from deletion
+    }
 
     _groupMeta = [..._groupMeta]..removeAt(idx);
     _rebuildGroups();
@@ -352,7 +359,9 @@ class SplitProvider extends ChangeNotifier {
 
   void renameGroup(String groupId, String newName, {String? newCurrency}) {
     final idx = _groupMeta.indexWhere((g) => g.id == groupId);
-    if (idx == -1 || newName.trim().isEmpty) return;
+    if (idx == -1 || newName.trim().isEmpty) {
+      return;
+    }
     if (_groupMeta[idx].ownerId != _uid) return; // not the creator
     final updated = _groupMeta[idx].copyWith(
       name: newName.trim(),
@@ -377,10 +386,16 @@ class SplitProvider extends ChangeNotifier {
   List<Person> get allPeople => currentGroup?.members ?? [];
 
   List<Expense> get expenses => currentGroup?.expenses ?? [];
-  double get totalSpent => expenses
-      .where((e) => !e.isSettlement)
-      .fold(0.0, (s, e) => s + e.amount);
-  int get expenseCount => expenses.where((e) => !e.isSettlement).length;
+
+  double get totalSpent =>
+      expenses
+          .where((e) => !e.isSettlement)
+          .fold(0.0, (s, e) => s + e.amount);
+
+  int get expenseCount =>
+      expenses
+          .where((e) => !e.isSettlement)
+          .length;
 
   Person? personById(int id) {
     for (final p in allPeople) {
@@ -485,7 +500,9 @@ class SplitProvider extends ChangeNotifier {
       }
       double sum = customSplits.values.fold(0, (a, b) => a + b);
       if ((sum - amount).abs() > 0.01) {
-        return 'Sum of splits (${fmtCurrency(sum, currency)}) must equal total (${fmtCurrency(amount, currency)})';
+        return 'Sum of splits (${fmtCurrency(
+            sum, currency)}) must equal total (${fmtCurrency(
+            amount, currency)})';
       }
       return customSplits;
     }
@@ -554,15 +571,19 @@ class SplitProvider extends ChangeNotifier {
 
     final newExpense = Expense(
       id: FirestoreRepository.instance.newExpenseId(group.id),
-      desc: desc.trim().isEmpty
+      desc: desc
+          .trim()
+          .isEmpty
           ? (isSettlement ? 'Settlement' : 'Untitled expense')
           : desc.trim(),
       amount: amount,
       payerId: payerId,
       splitMap: finalSplitMap,
       isSettlement: isSettlement,
-      settledBy: {payerId}, // The person who paid is already paid/settled
-      addedBy: _uid, // security rules require addedBy == the signed-in uid
+      settledBy: {payerId},
+      // The person who paid is already paid/settled
+      addedBy: _uid,
+      // security rules require addedBy == the signed-in uid
       createdAt: DateTime.now(),
     );
 
@@ -706,7 +727,8 @@ class SplitProvider extends ChangeNotifier {
 
     final expense = expenses[existingIndex];
     final payerPerson = personById(expense.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid || expense.addedBy == _uid;
+    final isPayer = payerPerson?.linkedUserId == _uid ||
+        expense.addedBy == _uid;
     if (!isPayer && group.ownerId != _uid) return; // not authorized
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
@@ -732,7 +754,8 @@ class SplitProvider extends ChangeNotifier {
 
     final original = expenses[existingIndex];
     final payerPerson = personById(original.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid || original.addedBy == _uid;
+    final isPayer = payerPerson?.linkedUserId == _uid ||
+        original.addedBy == _uid;
     if (!isPayer) {
       return 'Only the person who paid can edit this split.';
     }
@@ -771,7 +794,9 @@ class SplitProvider extends ChangeNotifier {
     }
 
     final updatedExpense = original.copyWith(
-      desc: desc.trim().isEmpty ? original.desc : desc.trim(),
+      desc: desc
+          .trim()
+          .isEmpty ? original.desc : desc.trim(),
       amount: amount,
       payerId: payerId,
       splitMap: newSplitMap,
@@ -783,7 +808,8 @@ class SplitProvider extends ChangeNotifier {
     _expensesByGroup[group.id] = updatedExpenses;
     _rebuildGroups();
     notifyListeners();
-    _persist(FirestoreRepository.instance.updateExpense(group.id, updatedExpense));
+    _persist(
+        FirestoreRepository.instance.updateExpense(group.id, updatedExpense));
     return null;
   }
 
@@ -802,14 +828,23 @@ class SplitProvider extends ChangeNotifier {
     if (existingIndex == -1) return;
 
     final expense = groupExpenses[existingIndex];
-    if (expense.isSettlement) return; // legacy settlement records aren't toggleable
-    if (!expense.splitMap.containsKey(personId)) return; // not part of this split
-    if (personId == expense.payerId) return; // Cannot toggle/revert the person who paid
+    if (expense.isSettlement) {
+      return; // legacy settlement records aren't toggleable
+    }
+    if (!expense.splitMap.containsKey(personId)) {
+      return; // not part of this split
+    }
+    if (personId == expense.payerId) {
+      return; // Cannot toggle/revert the person who paid
+    }
 
     final payerPerson = personById(expense.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid || expense.addedBy == _uid;
+    final isPayer = payerPerson?.linkedUserId == _uid ||
+        expense.addedBy == _uid;
     // Permission check: only the person who paid (or group owner) can toggle settlements
-    if (!isPayer && group.ownerId != _uid) return;
+    if (!isPayer && group.ownerId != _uid) {
+      return;
+    }
 
     final updatedSettledBy = Set<int>.from(expense.settledBy);
     if (updatedSettledBy.contains(personId)) {
@@ -971,14 +1006,16 @@ class SplitProvider extends ChangeNotifier {
     }
 
     final result = displayNames.keys
-        .map((key) => OverallBalance(
-      key: key,
-      name: displayNames[key]!,
-      groupCount: groupCounts[key] ?? 0,
-      currencyBalances: currencyMaps[key] ?? {},
-      breakdown: breakdowns[key] ?? [],
-    ))
-        .where((o) => o.breakdown.isNotEmpty) // Only show people with active history
+        .map((key) =>
+        OverallBalance(
+          key: key,
+          name: displayNames[key]!,
+          groupCount: groupCounts[key] ?? 0,
+          currencyBalances: currencyMaps[key] ?? {},
+          breakdown: breakdowns[key] ?? [],
+        ))
+        .where((o) =>
+    o.breakdown.isNotEmpty) // Only show people with active history
         .toList();
 
     result.sort((a, b) => b.primarySortAmount.compareTo(a.primarySortAmount));
@@ -1088,7 +1125,8 @@ extension AiContextExtension on SplitProvider {
           'recentExpenses': g.expenses
               .where((e) => !e.isSettlement)
               .take(10)
-              .map((e) => {
+              .map((e) =>
+          {
             'desc': e.desc,
             'amount': e.amount,
             'paidBy': g.members
