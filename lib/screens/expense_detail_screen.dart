@@ -105,11 +105,11 @@ class ExpenseDetailScreen extends StatelessWidget {
         .cast<Person>();
 
     final totalParticipants = liveExpense.participantCount;
-    final isAdder = liveExpense.addedBy == provider.uid;
+    final isAdder = liveExpense.addedBy == provider.uid || provider.isCurrentGroupOwner;
     final isFullySettled = liveExpense.isFullySettled;
     final settledCount = liveExpense.settledCount;
     // Legacy settlement records can't be toggled per person.
-    final canToggle = isAdder && !liveExpense.isSettlement;
+    final canToggle = liveExpense.addedBy == provider.uid && !liveExpense.isSettlement;
 
     return Scaffold(
       body: Container(
