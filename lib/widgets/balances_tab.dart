@@ -52,7 +52,7 @@ class BalancesTab extends StatelessWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    final error = provider.settleUp(fromId, toId, amount);
+    final error = await provider.settleUp(fromId, toId, amount);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
