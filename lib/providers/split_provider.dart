@@ -727,6 +727,17 @@ class SplitProvider extends ChangeNotifier {
       }
     }
 
+    // A partial amount remains valid only if that person's share did not
+    // change. Drop stale partial allocations when an edited split changes.
+    final newSettledAmounts = <int, double>{};
+    for (final entry in original.settledAmounts.entries) {
+      if (original.splitMap[entry.key] != null &&
+          newSplitMap[entry.key] != null &&
+          (original.splitMap[entry.key]! - newSplitMap[entry.key]!).abs() < 0.005) {
+        newSettledAmounts[entry.key] = entry.value;
+      }
+    }
+
     final updatedExpense = original.copyWith(
       desc: desc
           .trim()
@@ -735,6 +746,7 @@ class SplitProvider extends ChangeNotifier {
       payerId: payerId,
       splitMap: newSplitMap,
       settledBy: newSettledBy,
+      settledAmounts: newSettledAmounts,
     );
 
     final updatedExpenses = [...expenses];
