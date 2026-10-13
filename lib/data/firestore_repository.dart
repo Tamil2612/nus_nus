@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import '../models/expense.dart';
 import '../models/group.dart';
@@ -133,7 +134,7 @@ class FirestoreRepository {
     }
   }
 
-  /// Updates ONLY `settledBy` — what the rules allow any member to change.
+  /// Updates only the expense creator's whole-share paid/pending flags.
   Future<void> updateSettledBy(
       String groupId, String expenseId, Set<int> settledBy) async {
     try {
@@ -144,6 +145,24 @@ class FirestoreRepository {
       debugPrint('FirestoreRepository.updateSettledBy failed: $e\n$st');
       rethrow;
     }
+  }
+
+  /// Records an external pairwise settlement through a trusted callable.
+  /// The function validates both participants, the current net balance and
+  /// atomically allocates the settled amount to existing expense shares.
+  Future<void> recordPairSettlement({
+    required String groupId,
+    required int fromId,
+    required int toId,
+    required double amount,
+  }) async {
+    final callable = FirebaseFunctions.instance.httpsCallable('recordPairSettlement');
+    await callable.call({
+      'groupId': groupId,
+      'fromId': fromId,
+      'toId': toId,
+      'amount': amount,
+    });
   }
 
   Future<void> deleteExpense(String groupId, String expenseId) async {
