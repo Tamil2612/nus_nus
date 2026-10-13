@@ -196,7 +196,35 @@ void main() {
       expect(expenses.single.isPersonPaid(2), isFalse);
     });
 
-    test('partial settlement of net debt reaches zero without clearing reverse debt', () {
+    test('net settlement reconciles opposing debts plus the net amount paid', () {
+      final expenses = [
+        Expense(
+          id: 'e-forward',
+          desc: 'Forward debt',
+          amount: 100,
+          payerId: 1,
+          splitMap: {2: 100},
+          settledAmounts: {2: 100},
+        ),
+        Expense(
+          id: 'e-reverse',
+          desc: 'Reverse debt',
+          amount: 40,
+          payerId: 2,
+          splitMap: {1: 40},
+          settledAmounts: {1: 40},
+        ),
+      ];
+
+      final balances = SettlementCalculator.computePairBalances(
+        SettlementCalculator.deriveLedgerEntries(expenses),
+      );
+      expect(balances, isEmpty);
+      expect(expenses.first.isPersonPaid(2), isTrue);
+      expect(expenses.last.isPersonPaid(1), isTrue);
+    });
+
+    test('partial net settlement leaves exactly the unpaid net balance', () {
       final expenses = [
         Expense(
           id: 'e-forward',
@@ -212,15 +240,17 @@ void main() {
           amount: 40,
           payerId: 2,
           splitMap: {1: 40},
+          settledAmounts: {1: 40},
         ),
       ];
 
       final balances = SettlementCalculator.computePairBalances(
         SettlementCalculator.deriveLedgerEntries(expenses),
       );
-      expect(balances, isEmpty);
-      expect(expenses.first.remainingShare(2), closeTo(40, 0.01));
-      expect(expenses.last.remainingShare(1), closeTo(40, 0.01));
+      expect(balances.length, 1);
+      expect(balances.single.debtorId, 2);
+      expect(balances.single.creditorId, 1);
+      expect(balances.single.owedAmount, closeTo(40, 0.01));
     });
 
     test('settled share is excluded from the outstanding balance', () {
