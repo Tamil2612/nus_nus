@@ -343,6 +343,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
                       final isSettled = liveExpense.isPersonPaid(person.id);
+                      final isPartial = liveExpense.isPersonPartiallyPaid(person.id);
 
                       return GestureDetector(
                         onTap: (canToggle && !isPayer)
@@ -401,7 +402,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                                             borderRadius: BorderRadius.circular(6.r),
                                           ),
                                           child: Text(
-                                            isSettled ? 'PAID' : 'PENDING',
+                                            isSettled ? 'PAID' : (isPartial ? 'PARTIAL' : 'PENDING'),
                                             style: TextStyle(
                                               fontSize: 9.sp,
                                               fontWeight: FontWeight.w900,
