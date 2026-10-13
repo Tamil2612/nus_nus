@@ -256,3 +256,131 @@ exports.onExpenseCreated = functions.firestore
 exports.healthCheck = functions.https.onRequest((req, res) => {
   res.status(200).send({ status: 'OK', timestamp: new Date().toISOString() });
 });
+
+// Record an external pairwise settlement against existing expense shares.
+// This does not move money and never creates a synthetic expense/payment record.
+exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to record a settlement.');
+  }
+
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  const fromId = Number(data.fromId);
+  const toId = Number(data.toId);
+  const amount = Number(data.amount);
+  if (!groupId || !Number.isSafeInteger(fromId) || !Number.isSafeInteger(toId) ||
+      fromId === toId || !Number.isFinite(amount) || amount <= 0 ||
+      amount > 100000000) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid settlement details.');
+  }
+  const requestedCents = Math.round(amount * 100);
+  if (Math.abs(requestedCents / 100 - amount) > 0.005) {
+    throw new functions.https.HttpsError('invalid-argument', 'Settlement must be in whole cents.');
+  }
+
+  const groupRef = db.collection('groups').doc(groupId);
+  const expensesRef = groupRef.collection('expenses');
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const groupSnap = await tx.get(groupRef);
+      if (!groupSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Group not found.');
+      }
+      const group = groupSnap.data();
+      const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
+      if (!memberUids.includes(context.auth.uid)) {
+        throw new functions.https.HttpsError('permission-denied', 'You are not a member of this group.');
+      }
+      const people = Array.isArray(group.members) ? group.members : [];
+      const fromPerson = people.find((p) => Number(p.id) === fromId);
+      const toPerson = people.find((p) => Number(p.id) === toId);
+      if (!fromPerson || !toPerson ||
+          (fromPerson.linkedUserId !== context.auth.uid &&
+           toPerson.linkedUserId !== context.auth.uid)) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Only one of the two people in this debt can confirm it.'
+        );
+      }
+
+      const expensesSnap = await tx.get(expensesRef);
+      const docs = expensesSnap.docs
+        .filter((doc) => doc.data().isSettlement !== true)
+        .sort((a, b) => {
+          const at = a.data().createdAt && a.data().createdAt.toMillis
+            ? a.data().createdAt.toMillis() : 0;
+          const bt = b.data().createdAt && b.data().createdAt.toMillis
+            ? b.data().createdAt.toMillis() : 0;
+          return at - bt || a.id.localeCompare(b.id);
+        });
+
+      const outstandingFor = (expense, personId) => {
+        const splits = expense.splitMap || {};
+        const share = Number(splits[String(personId)] ?? splits[personId] ?? 0);
+        if (!Number.isFinite(share) || share <= 0) return 0;
+        const rawSettled = expense.settledBy;
+        const settled = Array.isArray(rawSettled)
+          ? rawSettled.map(String).includes(String(personId))
+          : !!(rawSettled && rawSettled[String(personId)] === true);
+        if (settled) return 0;
+        const rawAmounts = expense.settledAmounts || {};
+        const already = Number(rawAmounts[String(personId)] ?? 0);
+        return Math.max(0, Math.round((share - already) * 100));
+      };
+
+      let forwardCents = 0;
+      let reverseCents = 0;
+      for (const doc of docs) {
+        const expense = doc.data();
+        const payerId = Number(expense.payerId);
+        if (payerId === toId) forwardCents += outstandingFor(expense, fromId);
+        if (payerId === fromId) reverseCents += outstandingFor(expense, toId);
+      }
+      const netCents = forwardCents - reverseCents;
+      if (netCents <= 0) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'The debt direction changed. Refresh balances and try again.'
+        );
+      }
+      if (requestedCents > netCents) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Settlement amount exceeds the current net balance. Refresh and try again.'
+        );
+      }
+
+      let remaining = requestedCents;
+      const writes = [];
+      for (const doc of docs) {
+        if (remaining <= 0) break;
+        const expense = doc.data();
+        if (Number(expense.payerId) !== toId) continue;
+        const shareCents = outstandingFor(expense, fromId);
+        if (shareCents <= 0) continue;
+        const applyCents = Math.min(remaining, shareCents);
+        const rawAmounts = expense.settledAmounts || {};
+        const nextAmounts = { ...rawAmounts };
+        const previousCents = Math.round(Number(rawAmounts[String(fromId)] || 0) * 100);
+        nextAmounts[String(fromId)] = (previousCents + applyCents) / 100;
+        writes.push({ ref: doc.ref, settledAmounts: nextAmounts });
+        remaining -= applyCents;
+      }
+      if (remaining > 0) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Could not allocate the full settlement to existing shares.'
+        );
+      }
+      for (const write of writes) {
+        tx.update(write.ref, { settledAmounts: write.settledAmounts });
+      }
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('recordPairSettlement failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not record settlement. Refresh and try again.');
+  }
+});
