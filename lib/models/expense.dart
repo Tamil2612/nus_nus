@@ -11,8 +11,8 @@ class Expense {
   final bool isSettlement;
   /// Set of person IDs whose entire share has been marked paid (legacy-compatible).
   final Set<int> settledBy;
-  /// Amount paid toward each person's share, in the group's currency.
-  /// Keys are participant IDs; this supports partial pairwise settlements.
+  /// Amount reconciled against each person's share, including netted debt
+  /// offsets and external partial settlements. Keys are participant IDs.
   final Map<int, double> settledAmounts;
   /// Uid of whoever logged this expense — any member of the group can add
   /// one, not just the creator, so this is what "Added by X" is built
