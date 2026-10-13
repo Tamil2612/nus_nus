@@ -116,68 +116,52 @@ JSON Schema:
   }
 });
 
-// Helper function to calculate settlements
+// Helper function to calculate pairwise debts (strictly pair by pair)
 function calculateSettlements(expenses, members) {
-  const balances = {};
+  const pairNet = {};
 
-  // Initialize balances
-  members.forEach(member => {
-    balances[member] = 0;
-  });
-
-  // Calculate balances from expenses
   expenses.forEach(expense => {
-    const { amount, payerName, splitMap } = expense;
+    const { payerName, splitMap, settledBy = [] } = expense;
+    if (!payerName || !splitMap) return;
 
-    // Payer gets positive balance (they're owed money)
-    balances[payerName] = (balances[payerName] || 0) + amount;
+    Object.entries(splitMap).forEach(([participant, share]) => {
+      // Payer never owes themselves, and paid/settled shares are skipped
+      if (participant === payerName) return;
+      if (Array.isArray(settledBy) && settledBy.includes(participant)) return;
+      if (share <= 0.001) return;
 
-    // Split amounts are negative (they owe money)
-    Object.entries(splitMap).forEach(([member, amount]) => {
-      balances[member] = (balances[member] || 0) - amount;
+      // Directed debt: participant owes payerName 'share'
+      const p1 = participant < payerName ? participant : payerName;
+      const p2 = participant < payerName ? payerName : participant;
+      const key = `${p1}|${p2}`;
+
+      // Sign: positive means p1 owes p2
+      const sign = (participant === p1) ? 1.0 : -1.0;
+      pairNet[key] = (pairNet[key] || 0) + sign * share;
     });
   });
 
-  // Generate settlement transactions
   const settlements = [];
-  const debtors = [];
-  const creditors = [];
+  Object.entries(pairNet).forEach(([key, netAmount]) => {
+    if (Math.abs(netAmount) <= 0.005) return;
+    const [p1, p2] = key.split('|');
 
-  // Separate debtors and creditors
-  Object.entries(balances).forEach(([member, balance]) => {
-    if (balance < -0.01) { // owes money (negative balance)
-      debtors.push({ member, amount: Math.abs(balance) });
-    } else if (balance > 0.01) { // is owed money (positive balance)
-      creditors.push({ member, amount: balance });
+    if (netAmount > 0) {
+      // p1 owes p2
+      settlements.push({
+        from: p1,
+        to: p2,
+        amount: parseFloat(netAmount.toFixed(2))
+      });
+    } else {
+      // p2 owes p1
+      settlements.push({
+        from: p2,
+        to: p1,
+        amount: parseFloat(Math.abs(netAmount).toFixed(2))
+      });
     }
   });
-
-  // Sort by amount (largest first)
-  debtors.sort((a, b) => b.amount - a.amount);
-  creditors.sort((a, b) => b.amount - a.amount);
-
-  // Settle debts
-  let debtorIndex = 0;
-  let creditorIndex = 0;
-
-  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-    const debtor = debtors[debtorIndex];
-    const creditor = creditors[creditorIndex];
-
-    const settlementAmount = Math.min(debtor.amount, creditor.amount);
-
-    settlements.push({
-      from: debtor.member,
-      to: creditor.member,
-      amount: parseFloat(settlementAmount.toFixed(2))
-    });
-
-    debtor.amount -= settlementAmount;
-    creditor.amount -= settlementAmount;
-
-    if (debtor.amount <= 0.01) debtorIndex++;
-    if (creditor.amount <= 0.01) creditorIndex++;
-  }
 
   return settlements;
 }
@@ -439,6 +423,58 @@ ${userQuery}
     );
   }
 });
+
+// Send push notification when a new expense/split is created
+exports.onExpenseCreated = functions.firestore
+  .document('groups/{groupId}/expenses/{expenseId}')
+  .onCreate(async (snapshot, context) => {
+    const groupId = context.params.groupId;
+    const expenseData = snapshot.data();
+
+    const desc = expenseData.desc || 'New split';
+    const amount = expenseData.amount || 0;
+    const addedBy = expenseData.addedBy;
+
+    try {
+      const groupDoc = await db.collection('groups').doc(groupId).get();
+      if (!groupDoc.exists) return null;
+
+      const groupData = groupDoc.data();
+      const memberUids = groupData.memberUids || [];
+      const groupName = groupData.name || 'Group';
+
+      const tokens = [];
+      for (const uid of memberUids) {
+        if (uid === addedBy) continue;
+
+        const userDoc = await db.collection('users').doc(uid).get();
+        if (userDoc.exists && userDoc.data().fcmToken) {
+          tokens.push(userDoc.data().fcmToken);
+        }
+      }
+
+      if (tokens.length === 0) return null;
+
+      const payload = {
+        notification: {
+          title: `New split in ${groupName}`,
+          body: `${desc} (${amount}) was added.`,
+          sound: 'default'
+        },
+        data: {
+          groupId: groupId,
+          expenseId: context.params.expenseId
+        }
+      };
+
+      const response = await admin.messaging().sendToDevice(tokens, payload);
+      console.log('Successfully sent expense notification:', response);
+      return null;
+    } catch (error) {
+      console.error('Error sending expense notification:', error);
+      return null;
+    }
+  });
 
 // Health check function
 exports.healthCheck = functions.https.onRequest((req, res) => {

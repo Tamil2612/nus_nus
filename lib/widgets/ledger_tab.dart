@@ -21,22 +21,22 @@ class _LedgerTabState extends State<LedgerTab> {
   Future<void> _confirmRemovePerson(
       BuildContext context, SplitProvider provider, Person person) async {
     final hasHistory = provider.expenses.any(
-        (e) => e.payerId == person.id || e.splitMap.containsKey(person.id));
+            (e) => e.payerId == person.id || e.splitMap.containsKey(person.id));
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.paper,
         shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
         title: Text('Remove ${person.name}?',
             style: const TextStyle(
                 color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
           hasHistory
               ? '${person.name} has expense history in this group. They\'ll be hidden '
-                  'from new expenses, but past activity and any balance '
-                  'they still owe or are owed stays intact.'
+              'from new expenses, but past activity and any balance '
+              'they still owe or are owed stays intact.'
               : '${person.name} has no expenses yet, so they\'ll be removed completely.',
           style: const TextStyle(color: AppColors.slate),
         ),
@@ -44,7 +44,7 @@ class _LedgerTabState extends State<LedgerTab> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child:
-                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
+            const Text('Cancel', style: TextStyle(color: AppColors.slate)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -173,6 +173,14 @@ class _ActivityExpenseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<SplitProvider>();
+    final isFullySettled = expense.isFullySettled;
+    final settledCount = expense.settledCount;
+    final totalSplitCount = expense.participantCount;
+    // The payer always counts as paid, so "in progress" only starts once
+    // someone else has paid their share.
+    final hasProgress = expense.hasPaymentsFromOthers;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -196,25 +204,29 @@ class _ActivityExpenseCard extends StatelessWidget {
               // Vertical Ticket Side
               Container(
                 width: 60.w,
-                color: AppColors.brass,
+                color: isFullySettled
+                    ? AppColors.sage
+                    : AppColors.brass,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      expense.isSettlement
-                          ? Icons.handshake
-                          : Icons.receipt_long,
+                      isFullySettled
+                          ? Icons.check_circle_outline
+                          : (hasProgress ? Icons.pending : Icons.receipt_long),
                       color: AppColors.ink,
                       size: 24.r,
                     ),
                     8.verticalSpace,
                     Text(
-                      'TAB',
+                      isFullySettled
+                          ? 'SETTLED'
+                          : (hasProgress ? '$settledCount/$totalSplitCount' : 'TAB'),
                       style: TextStyle(
-                        fontSize: 10.sp,
+                        fontSize: 9.sp,
                         fontWeight: FontWeight.w900,
                         color: AppColors.ink,
-                        letterSpacing: 1.5,
+                        letterSpacing: 1.2,
                       ),
                     ),
                   ],
@@ -225,7 +237,7 @@ class _ActivityExpenseCard extends StatelessWidget {
               Expanded(
                 child: Padding(
                   padding:
-                      EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
+                  EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -233,25 +245,51 @@ class _ActivityExpenseCard extends StatelessWidget {
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              expense.desc.toUpperCase(),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13.sp,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.ink,
-                                letterSpacing: 0.5,
-                              ),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    expense.desc.toUpperCase(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13.sp,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.ink,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                                if (isFullySettled) ...[
+                                  6.horizontalSpace,
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: 6.w, vertical: 1.5.h),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.sage
+                                          .withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(4.r),
+                                      border: Border.all(
+                                          color: AppColors.sage, width: 1.r),
+                                    ),
+                                    child: Text(
+                                      'SETTLED',
+                                      style: TextStyle(
+                                        fontSize: 8.5.sp,
+                                        fontWeight: FontWeight.w900,
+                                        color: AppColors.sage,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                           Text(
                             fmtCurrency(
                                 expense.amount,
-                                context
-                                    .read<SplitProvider>()
-                                    .currentGroup!
-                                    .currency),
+                                provider.currentGroup!.currency),
                             style: TextStyle(
                               fontSize: 15.sp,
                               fontWeight: FontWeight.w900,
@@ -319,7 +357,7 @@ class _ParticipantCircles extends StatelessWidget {
               child: CircleAvatar(
                 radius: 9.r,
                 backgroundColor:
-                    provider.personById(ids[i])?.color ?? AppColors.slate,
+                provider.personById(ids[i])?.color ?? AppColors.slate,
                 child: Text(
                   provider.personById(ids[i])?.name[0].toUpperCase() ?? '?',
                   style: TextStyle(

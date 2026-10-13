@@ -56,9 +56,13 @@ import '../models/group.dart';
 ///         allow create: if request.auth != null &&
 ///           request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids &&
 ///           request.resource.data.addedBy == request.auth.uid;
-///         // Only the person who ADDED the expense can edit or delete it
-///         allow update, delete: if request.auth != null &&
-///           request.auth.uid == resource.data.addedBy;
+///         // Any group member can update (e.g. mark individual shares paid/pending).
+///         allow update: if request.auth != null &&
+///           request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+///         // Only the person who added the expense or the group's creator can delete it.
+///         allow delete: if request.auth != null && (
+///           request.auth.uid == resource.data.addedBy ||
+///           request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId);
 ///       }
 ///     }
 ///   }
@@ -83,7 +87,7 @@ class FirestoreRepository {
   /// without re-fetching its whole member list, and vice versa.
   Stream<List<Group>> watchGroupsForUser(String uid) {
     return _groups.where('memberUids', arrayContains: uid).snapshots().map(
-        (snap) => snap.docs
+            (snap) => snap.docs
             .map((d) => Group.fromJson(d.id, d.data()))
             .toList());
   }
@@ -140,9 +144,9 @@ class FirestoreRepository {
     }
   }
 
-  /// Overwrites an existing expense in place. Restricted server-side to
-  /// whoever originally added it (`addedBy`) — not the group's creator,
-  /// unless they happen to be the same person. See [deleteExpense].
+  /// Overwrites an existing expense in place (edits, and per-person
+  /// paid/pending toggles via `settledBy`). Restricted server-side to
+  /// whoever originally added it (`addedBy`) or the group's creator.
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
       await _expensesCol(groupId).doc(expense.id).set(expense.toJson());

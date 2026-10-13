@@ -74,8 +74,9 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
       }
     }
 
-    // Fallback to first member if AI misidentified
-    payerId ??= _selectedGroup!.members.first.id;
+    // If the AI couldn't identify the payer, assume it's the signed-in user.
+    // (addExpense only lets you log splits you paid yourself.)
+    payerId ??= provider.personByUid(provider.uid)?.id;
 
     final Map<int, double> customSplits = {};
     final Set<int> splitWith = {};
@@ -96,6 +97,11 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
         splitWith.add(p.id);
       }
     }
+
+    // addExpense writes to the provider's current group, so make sure that's
+    // the group picked on this screen — otherwise the expense (and the
+    // member ids above) could end up in a different group.
+    provider.selectGroup(_selectedGroup!.id);
 
     final error = provider.addExpense(
       desc: result["description"] ?? "AI Expense",
@@ -285,73 +291,73 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
               Expanded(
                 child: _isAskMode
                     ? AiChatView(
-                        messages: _chatMessages,
-                        isLoading: _isChatLoading,
-                        scrollController: _chatScrollController,
-                      )
+                  messages: _chatMessages,
+                  isLoading: _isChatLoading,
+                  scrollController: _chatScrollController,
+                )
                     : SingleChildScrollView(
-                        controller: _scrollController,
-                        padding: EdgeInsets.all(20.w),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            /// Group
-                            GroupSelectorCard(
-                              selectedGroup: _selectedGroup,
-                              onGroupChanged: (group) {
-                                setState(() {
-                                  _selectedGroup = group;
-                                  _aiResult = null; // Reset AI result when group changes
-                                });
-                              },
-                            ),
-                            22.verticalSpace,
-
-                            /// Receipt Upload
-                            ReceiptUploadCard(
-                              imageBytes: _receiptBytes,
-                              onImageSelected: (bytes) {
-                                setState(() {
-                                  _receiptBytes = bytes;
-                                });
-                                if (bytes != null) {
-                                  _scrollToPrompt();
-                                }
-                              },
-                            ),
-
-                            22.verticalSpace,
-
-                            /// Prompt
-                            AiPromptInput(
-                              key: _promptKey,
-                              controller: promptController,
-                            ),
-
-                            if (_loading) ...[
-                              30.verticalSpace,
-                              const TypingIndicator(),
-                            ],
-
-                            if (_aiResult != null) ...[
-                              30.verticalSpace,
-                              AiResultCard(
-                                key: _resultKey,
-                                result: _aiResult!,
-                                currency: _selectedGroup?.currency ?? "AED",
-                                onSave: _saveExpense,
-                                onEdit: () {
-                                  setState(() {
-                                    _aiResult = null;
-                                  });
-                                },
-                              ),
-                            ],
-
-                            32.verticalSpace,
-                          ],
-                        ),
+                  controller: _scrollController,
+                  padding: EdgeInsets.all(20.w),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      /// Group
+                      GroupSelectorCard(
+                        selectedGroup: _selectedGroup,
+                        onGroupChanged: (group) {
+                          setState(() {
+                            _selectedGroup = group;
+                            _aiResult = null; // Reset AI result when group changes
+                          });
+                        },
                       ),
+                      22.verticalSpace,
+
+                      /// Receipt Upload
+                      ReceiptUploadCard(
+                        imageBytes: _receiptBytes,
+                        onImageSelected: (bytes) {
+                          setState(() {
+                            _receiptBytes = bytes;
+                          });
+                          if (bytes != null) {
+                            _scrollToPrompt();
+                          }
+                        },
+                      ),
+
+                      22.verticalSpace,
+
+                      /// Prompt
+                      AiPromptInput(
+                        key: _promptKey,
+                        controller: promptController,
+                      ),
+
+                      if (_loading) ...[
+                        30.verticalSpace,
+                        const TypingIndicator(),
+                      ],
+
+                      if (_aiResult != null) ...[
+                        30.verticalSpace,
+                        AiResultCard(
+                          key: _resultKey,
+                          result: _aiResult!,
+                          currency: _selectedGroup?.currency ?? "AED",
+                          onSave: _saveExpense,
+                          onEdit: () {
+                            setState(() {
+                              _aiResult = null;
+                            });
+                          },
+                        ),
+                      ],
+
+                      32.verticalSpace,
+                    ],
+                  ),
+                ),
               ),
 
               AiInputFooter(

@@ -12,6 +12,7 @@ import '../models/group.dart';
 import '../theme/app_colors.dart';
 import '../utils/settlement_calculator.dart';
 import '../utils/currency_formatter.dart';
+import '../services/notification_service.dart';
 
 class SplitProvider extends ChangeNotifier {
   /// Metadata (name/members/ownership) for every group visible to the
@@ -70,6 +71,9 @@ class SplitProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    // Trigger push notification permission request & FCM token registration
+    NotificationService.instance.initialize(uid);
+
     // Resolve the signed-in user's authoritative display name in the
     // background — the member directory (`users/{uid}`) is always correct
     // since it's written directly from the name typed at registration,
@@ -81,7 +85,7 @@ class SplitProvider extends ChangeNotifier {
     });
 
     _groupsSub = FirestoreRepository.instance.watchGroupsForUser(uid).listen(
-      (loaded) {
+          (loaded) {
         _onGroupMetaUpdated(loaded);
         _ensurePersonalGroupExists(uid, loaded);
       },
@@ -189,7 +193,7 @@ class SplitProvider extends ChangeNotifier {
   }
 
   List<Group> get groups => List.unmodifiable(_groups);
-  
+
   Group? get personalGroup {
     try {
       return _groups.firstWhere((g) => g.isPersonal && g.ownerId == _uid);
@@ -206,7 +210,7 @@ class SplitProvider extends ChangeNotifier {
 
   List<Group> get allOwnedGroups =>
       _groups.where((g) => g.ownerId == _uid).toList();
-  
+
   List<Group> get linkedGroups =>
       _groups.where((g) => g.ownerId != _uid && !g.isPersonal).toList();
 
@@ -274,9 +278,9 @@ class SplitProvider extends ChangeNotifier {
     if (loaded.any((g) => g.isPersonal && g.ownerId == uid)) return;
 
     final resolvedOwnerName =
-        (_myDisplayName != null && _myDisplayName!.isNotEmpty)
-            ? _myDisplayName!
-            : 'You';
+    (_myDisplayName != null && _myDisplayName!.isNotEmpty)
+        ? _myDisplayName!
+        : 'You';
 
     final me = Person(
       id: 1,
@@ -408,7 +412,7 @@ class SplitProvider extends ChangeNotifier {
     if (group == null || group.ownerId != _uid) return false;
 
     final hasHistory = expenses.any(
-      (e) => e.payerId == id || e.splitMap.containsKey(id),
+          (e) => e.payerId == id || e.splitMap.containsKey(id),
     );
 
     final updatedMembers = allPeople.map((p) {
@@ -486,8 +490,20 @@ class SplitProvider extends ChangeNotifier {
       return "You're not a member of this group.";
     }
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
-    if (payerId == null) return 'Add at least one person first.';
+    if (payerId == null) return 'Select who paid.';
     if (splitWith.isEmpty) return 'Pick who this should be split between.';
+
+    final payerPerson = personById(payerId);
+    if (payerPerson == null) return 'Select who paid.';
+
+    // Payer lock: a split can only be logged by the person who paid. The
+    // payer must be the signed-in user's own member entry in this group —
+    // this also rules out logging on behalf of a name-only (unlinked)
+    // member, which would otherwise bypass the lock.
+    if (payerPerson.linkedUserId != _uid) {
+      return 'You can only log expenses that you paid. '
+          'Ask ${payerPerson.name} to add this split.';
+    }
 
     final splitResult = _buildSplitMap(
       amount: amount,
@@ -507,7 +523,8 @@ class SplitProvider extends ChangeNotifier {
       payerId: payerId,
       splitMap: finalSplitMap,
       isSettlement: isSettlement,
-      addedBy: _uid,
+      settledBy: {payerId}, // The person who paid is already paid/settled
+      addedBy: _uid, // security rules require addedBy == the signed-in uid
       createdAt: DateTime.now(),
     );
 
@@ -518,13 +535,22 @@ class SplitProvider extends ChangeNotifier {
     return null;
   }
 
-  /// Records that [fromId] paid [toId] [amount] to settle up, in
-  /// [groupId] (defaults to the currently open group). This is the single
-  /// place that decides who's allowed to confirm a settlement — both the
-  /// per-group Balances tab *and* the cross-group Overview's "settle all
-  /// dues" go through this, so the same rule (only the group's creator or
-  /// the person actually being paid can confirm) applies everywhere,
-  /// rather than the two surfaces silently drifting apart.
+  /// Settles up between [fromId] and [toId] in [groupId] (defaults to the
+  /// currently open group) by marking their open shares as paid on the
+  /// individual expenses — no separate settlement record is created, so the
+  /// activity feed stays clean and every expense's PAID/PENDING status
+  /// stays the single source of truth.
+  ///
+  /// Both directions between the pair are cleared (shares [fromId] owes on
+  /// expenses [toId] paid, and vice versa) because the Balances tab shows
+  /// the *net* of the two; clearing only one side would flip the balance
+  /// instead of zeroing it. [amount] is only validated — the amount to pay
+  /// is whatever the Balances tab showed for the pair.
+  ///
+  /// This is the single place that decides who's allowed to confirm a
+  /// settlement — both the per-group Balances tab and the cross-group
+  /// Overview's "settle all dues" go through it: only the group's creator
+  /// or the person actually being paid can confirm.
   String? settleUp(int fromId, int toId, double amount, {String? groupId}) {
     final targetId = groupId ?? currentGroup?.id;
     if (targetId == null) return 'Select a group first.';
@@ -539,6 +565,10 @@ class SplitProvider extends ChangeNotifier {
     }
     if (group == null) return 'Could not find that group.';
 
+    if (!group.memberUids.contains(_uid)) {
+      return "You're not a member of this group.";
+    }
+
     Person? fromPerson;
     Person? toPerson;
     for (final p in group.members) {
@@ -551,51 +581,62 @@ class SplitProvider extends ChangeNotifier {
 
     // Permission check: only the group owner OR the person being paid
     // (creditor) can officially record this settlement — a debtor can't
-    // unilaterally mark their own debt as paid without the creditor (or
-    // the group owner) confirming it.
+    // unilaterally mark their own debt as paid.
     final isOwner = group.ownerId == _uid;
     final isCreditor = toPerson.linkedUserId == _uid;
-
     if (!isOwner && !isCreditor) {
       return 'Only ${toPerson.name} or the group creator can settle this up.';
     }
 
-    if (!group.memberUids.contains(_uid)) {
-      return "You're not a member of this group.";
+    final current = _expensesByGroup[group.id] ?? const <Expense>[];
+    final updatedList = <Expense>[];
+    final changed = <Expense>[];
+    for (final e in current) {
+      Set<int>? newSettled;
+      if (!e.isSettlement) {
+        if (e.payerId == toId &&
+            e.splitMap.containsKey(fromId) &&
+            !e.settledBy.contains(fromId)) {
+          newSettled = {...e.settledBy, fromId};
+        } else if (e.payerId == fromId &&
+            e.splitMap.containsKey(toId) &&
+            !e.settledBy.contains(toId)) {
+          newSettled = {...e.settledBy, toId};
+        }
+      }
+      if (newSettled != null) {
+        final updated = e.copyWith(settledBy: newSettled);
+        updatedList.add(updated);
+        changed.add(updated);
+      } else {
+        updatedList.add(e);
+      }
     }
 
-    final newExpense = Expense(
-      id: FirestoreRepository.instance.newExpenseId(group.id),
-      desc: '${fromPerson.name} settled with ${toPerson.name}',
-      amount: amount,
-      payerId: fromId,
-      splitMap: {toId: amount},
-      isSettlement: true,
-      addedBy: _uid,
-      createdAt: DateTime.now(),
-    );
+    if (changed.isEmpty) return 'Nothing left to settle between them.';
 
-    _expensesByGroup[group.id] = [
-      ...(_expensesByGroup[group.id] ?? const []),
-      newExpense,
-    ];
+    _expensesByGroup[group.id] = updatedList;
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.createExpense(group.id, newExpense);
+    for (final e in changed) {
+      FirestoreRepository.instance.updateExpense(group.id, e);
+    }
     return null;
   }
 
   /// deleting an expense someone else logged (or your own) is a destructive
-  /// action, so it's kept restricted to whoever originally added it.
+  /// action, so it's kept restricted to whoever originally added it or the payer.
   void removeExpense(String id) {
     final group = currentGroup;
     if (group == null) return;
-    
+
     final existingIndex = expenses.indexWhere((e) => e.id == id);
     if (existingIndex == -1) return;
-    
+
     final expense = expenses[existingIndex];
-    if (expense.addedBy != _uid) return; // not the person who added it
+    final payerPerson = personById(expense.payerId);
+    final isPayer = payerPerson?.linkedUserId == _uid || expense.addedBy == _uid;
+    if (!isPayer && group.ownerId != _uid) return; // not authorized
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
@@ -603,9 +644,7 @@ class SplitProvider extends ChangeNotifier {
     FirestoreRepository.instance.deleteExpense(group.id, id);
   }
 
-  /// RESTRICTED TO THE CREATOR of the expense, even if they aren't the group
-  /// owner — see the class-level note on [removeExpense] for why editing
-  /// stays this restrictive even though anyone can add.
+  /// RESTRICTED TO THE CREATOR / PAYER of the expense.
   String? editExpense({
     required String id,
     required String desc,
@@ -621,12 +660,19 @@ class SplitProvider extends ChangeNotifier {
     if (existingIndex == -1) return 'That expense no longer exists.';
 
     final original = expenses[existingIndex];
-    if (original.addedBy != _uid) {
-      return 'Only the person who added this split can edit it.';
+    final payerPerson = personById(original.payerId);
+    final isPayer = payerPerson?.linkedUserId == _uid || original.addedBy == _uid;
+    if (!isPayer) {
+      return 'Only the person who paid can edit this split.';
     }
 
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
     if (payerId == null) return 'Add at least one person first.';
+    // Payer lock: who paid can't be reassigned after the fact, otherwise the
+    // "only the payer can log a split" rule could be sidestepped by editing.
+    if (payerId != original.payerId) {
+      return "Who paid can't be changed. Delete this split and log it again.";
+    }
     if (splitWith.isEmpty) return 'Pick who this should be split between.';
 
     final finalSplitMap = _buildSplitMap(
@@ -637,11 +683,28 @@ class SplitProvider extends ChangeNotifier {
     );
     if (finalSplitMap is String) return finalSplitMap; // error message
 
+    final newSplitMap = finalSplitMap as Map<int, double>;
+
+    // Keep "paid" flags only for people still in the split whose share
+    // didn't change — a changed share means the old payment no longer
+    // matches what they owe. The payer always stays marked as paid.
+    final newSettledBy = <int>{payerId};
+    for (final id in original.settledBy) {
+      final oldShare = original.splitMap[id];
+      final newShare = newSplitMap[id];
+      if (oldShare != null &&
+          newShare != null &&
+          (oldShare - newShare).abs() < 0.005) {
+        newSettledBy.add(id);
+      }
+    }
+
     final updatedExpense = original.copyWith(
       desc: desc.trim().isEmpty ? original.desc : desc.trim(),
       amount: amount,
       payerId: payerId,
-      splitMap: finalSplitMap as Map<int, double>,
+      splitMap: newSplitMap,
+      settledBy: newSettledBy,
     );
 
     final updatedExpenses = [...expenses];
@@ -657,6 +720,66 @@ class SplitProvider extends ChangeNotifier {
   /// [SettlementCalculator.deriveLedgerEntries] for the derivation rules.
   List<LedgerEntry> get ledgerEntries =>
       SettlementCalculator.deriveLedgerEntries(expenses);
+
+  /// Toggles whether a specific person has settled their share of an expense.
+  void togglePersonSettlement(String expenseId, int personId) {
+    final group = currentGroup;
+    if (group == null) return;
+
+    final groupExpenses = _expensesByGroup[group.id] ?? const [];
+    final existingIndex = groupExpenses.indexWhere((e) => e.id == expenseId);
+    if (existingIndex == -1) return;
+
+    final expense = groupExpenses[existingIndex];
+    if (expense.isSettlement) return; // legacy settlement records aren't toggleable
+    if (!expense.splitMap.containsKey(personId)) return; // not part of this split
+    if (personId == expense.payerId) return; // Cannot toggle/revert the person who paid
+
+    final payerPerson = personById(expense.payerId);
+    final isPayer = payerPerson?.linkedUserId == _uid || expense.addedBy == _uid;
+    // Permission check: only the person who paid (or group owner) can toggle settlements
+    if (!isPayer && group.ownerId != _uid) return;
+
+    final updatedSettledBy = Set<int>.from(expense.settledBy);
+    if (updatedSettledBy.contains(personId)) {
+      updatedSettledBy.remove(personId);
+    } else {
+      updatedSettledBy.add(personId);
+    }
+    final updated = expense.copyWith(settledBy: updatedSettledBy);
+
+    final list = List<Expense>.from(groupExpenses);
+    list[existingIndex] = updated;
+
+    _expensesByGroup[group.id] = list;
+    _rebuildGroups();
+    notifyListeners();
+    FirestoreRepository.instance.updateExpense(group.id, updated);
+  }
+
+  Expense? _expenseById(String expenseId) {
+    for (final e in expenses) {
+      if (e.id == expenseId) return e;
+    }
+    return null;
+  }
+
+  /// Checks if a specific person has settled their share of an expense.
+  bool isPersonSettled(String expenseId, int personId) =>
+      _expenseById(expenseId)?.isPersonPaid(personId) ?? false;
+
+  /// Number of split participants who have settled their share (the payer
+  /// counts as settled when they're part of the split).
+  int getSettledCount(String expenseId) =>
+      _expenseById(expenseId)?.settledCount ?? 0;
+
+  /// Number of people the expense is split between.
+  int getParticipantCount(String expenseId) =>
+      _expenseById(expenseId)?.participantCount ?? 0;
+
+  /// Checks if all people in an expense have settled their share.
+  bool isExpenseFullySettled(String expenseId) =>
+      _expenseById(expenseId)?.isFullySettled ?? false;
 
   /// The net debt between every pair of people who have ever transacted in
   /// this group — this is the "who specifically owes whom" detail that a
@@ -687,7 +810,7 @@ class SplitProvider extends ChangeNotifier {
   List<Transfer> get settlement =>
       SettlementCalculator.computeSettlement(balances);
 
-  /// Aggregated net balance per currency across EVERY group the signed-in 
+  /// Aggregated net balance per currency across EVERY group the signed-in
   /// user is a member of.
   Map<String, double> get globalNetStandings {
     final standings = <String, double>{};
@@ -735,7 +858,7 @@ class SplitProvider extends ChangeNotifier {
       for (final pb in pairs) {
         if (pb.personAId != myId && pb.personBId != myId) continue;
         final counterpartId =
-            pb.personAId == myId ? pb.personBId : pb.personAId;
+        pb.personAId == myId ? pb.personBId : pb.personAId;
         Person? counterpart;
         for (final p in g.members) {
           if (p.id == counterpartId) {
@@ -751,38 +874,38 @@ class SplitProvider extends ChangeNotifier {
 
         final key = counterpart.linkedUserId ??
             'name:${counterpart.name.trim().toLowerCase()}';
-        
+
         displayNames.putIfAbsent(key, () => counterpart!.name.trim());
         if (seenInThisGroup.add(key)) {
           groupCounts[key] = (groupCounts[key] ?? 0) + 1;
         }
 
         if (signedFromMe.abs() > 0.005) {
-          currencyMaps.putIfAbsent(key, () => {})[g.currency] = 
+          currencyMaps.putIfAbsent(key, () => {})[g.currency] =
               (currencyMaps[key]![g.currency] ?? 0) + signedFromMe;
 
           breakdowns.putIfAbsent(key, () => []).add(
-                GroupContribution(
-                  groupId: g.id,
-                  groupName: g.name,
-                  currency: g.currency,
-                  amount: signedFromMe,
-                  myId: myId,
-                  counterpartId: counterpartId,
-                ),
-              );
+            GroupContribution(
+              groupId: g.id,
+              groupName: g.name,
+              currency: g.currency,
+              amount: signedFromMe,
+              myId: myId,
+              counterpartId: counterpartId,
+            ),
+          );
         }
       }
     }
 
     final result = displayNames.keys
         .map((key) => OverallBalance(
-              key: key,
-              name: displayNames[key]!,
-              groupCount: groupCounts[key] ?? 0,
-              currencyBalances: currencyMaps[key] ?? {},
-              breakdown: breakdowns[key] ?? [],
-            ))
+      key: key,
+      name: displayNames[key]!,
+      groupCount: groupCounts[key] ?? 0,
+      currencyBalances: currencyMaps[key] ?? {},
+      breakdown: breakdowns[key] ?? [],
+    ))
         .where((o) => o.breakdown.isNotEmpty) // Only show people with active history
         .toList();
 
@@ -894,13 +1017,13 @@ extension AiContextExtension on SplitProvider {
               .where((e) => !e.isSettlement)
               .take(10)
               .map((e) => {
-                    'desc': e.desc,
-                    'amount': e.amount,
-                    'paidBy': g.members
-                        .firstWhere((m) => m.id == e.payerId,
-                            orElse: () => Person(id: 0, name: '?', color: Colors.grey))
-                        .name,
-                  })
+            'desc': e.desc,
+            'amount': e.amount,
+            'paidBy': g.members
+                .firstWhere((m) => m.id == e.payerId,
+                orElse: () => Person(id: 0, name: '?', color: Colors.grey))
+                .name,
+          })
               .toList(),
         };
       }).toList(),
@@ -910,5 +1033,4 @@ extension AiContextExtension on SplitProvider {
     return JsonEncoder.withIndent('  ').convert(context);
   }
 }
-
 

@@ -57,14 +57,20 @@ class MemberDirectoryRepository {
     }
   }
 
-  Future<void> upsertProfile(AppUser user) async {
+  Future<void> upsertProfile(AppUser user, {String? fcmToken}) async {
     try {
-      await _users.doc(user.uid).set({
+      final data = <String, dynamic>{
         'name': user.name,
         'email': user.email,
         'phoneNumber': user.phoneNumber,
+        'platform': defaultTargetPlatform.name,
+        'lastLogin': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      };
+      if (fcmToken != null) {
+        data['fcmToken'] = fcmToken;
+      }
+      await _users.doc(user.uid).set(data, SetOptions(merge: true));
     } catch (e, st) {
       debugPrint('MemberDirectoryRepository.upsertProfile failed: $e\n$st');
     }

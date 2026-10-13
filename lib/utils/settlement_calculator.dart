@@ -26,7 +26,9 @@ class SettlementCalculator {
   ///   positive entry `participant -> payer : theirShare`. The payer never
   ///   owes themselves, so their own share (if present in the split map) is
   ///   skipped entirely.
-  /// - Settlement expense (created via [SplitProvider.settleUp]): stored as
+  ///   Shares already marked paid in [Expense.settledBy] are skipped.
+  /// - Legacy settlement expense (older versions of settleUp wrote these;
+  ///   new settlements just mark shares paid instead): stored as
   ///   payerId = the person settling up (the debtor), splitMap = a single
   ///   `{creditorId: amount}` entry. This produces one *negative* entry
   ///   `debtor -> creditor : -amount`, which nets against earlier positive
@@ -48,6 +50,10 @@ class SettlementCalculator {
       } else {
         e.splitMap.forEach((personId, share) {
           if (personId == e.payerId) return; // payer never owes themselves
+          // A share the payer has marked as paid is no longer owed, so it
+          // drops out of balances — this is what ties the per-expense
+          // PAID/PENDING toggles to the Balances tab.
+          if (e.settledBy.contains(personId)) return;
           if (share.abs() <= 0.001) return;
           entries.add(LedgerEntry(
             expenseId: e.id,
@@ -155,7 +161,7 @@ class SettlementCalculator {
     int i = 0, j = 0;
     while (i < debtors.length && j < creditors.length) {
       final pay =
-          debtRemain[i] < credRemain[j] ? debtRemain[i] : credRemain[j];
+      debtRemain[i] < credRemain[j] ? debtRemain[i] : credRemain[j];
       result.add(Transfer(debtors[i].key, creditors[j].key, pay));
       debtRemain[i] -= pay;
       credRemain[j] -= pay;

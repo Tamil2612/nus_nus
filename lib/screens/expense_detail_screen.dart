@@ -19,27 +19,32 @@ class ExpenseDetailScreen extends StatelessWidget {
 
   const ExpenseDetailScreen({super.key, required this.expense});
 
-  Future<void> _confirmDelete(BuildContext context, SplitProvider provider, Expense live) async {
+  Future<void> _confirmDelete(BuildContext context, SplitProvider provider,
+      Expense live) async {
     final isSettlement = live.isSettlement;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.paper,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: Text(isSettlement ? 'Revert settlement?' : 'Delete this split?',
-            style: const TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.r)),
+        title: Text(
+            isSettlement ? 'Revert settlement?' : 'Delete this split?',
+            style: const TextStyle(
+                color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
           isSettlement
               ? 'This will remove the payment record and restore the previous balances. '
-                  'This action cannot be undone.'
+              'This action cannot be undone.'
               : 'This will permanently remove this expense from the group record. '
-                  'This action cannot be undone.',
+              'This action cannot be undone.',
           style: const TextStyle(color: AppColors.slate),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.slate)),
+            child: const Text(
+                'Cancel', style: TextStyle(color: AppColors.slate)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -98,10 +103,14 @@ class ExpenseDetailScreen extends StatelessWidget {
         .where((p) => p != null)
         .toList()
         .cast<Person>();
-    
-    final totalParticipants = splitParticipants.length;
-    final isAdder = liveExpense.addedBy == provider.uid;
-    
+
+    final totalParticipants = liveExpense.participantCount;
+    final isAdder = liveExpense.addedBy == provider.uid || provider.isCurrentGroupOwner;
+    final isFullySettled = liveExpense.isFullySettled;
+    final settledCount = liveExpense.settledCount;
+    // Legacy settlement records can't be toggled per person.
+    final canToggle = isAdder && !liveExpense.isSettlement;
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -121,7 +130,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.paper),
+                      icon: const Icon(
+                          Icons.arrow_back, color: AppColors.paper),
                       onPressed: () => Navigator.pop(context),
                     ),
                     Row(
@@ -131,8 +141,9 @@ class ExpenseDetailScreen extends StatelessWidget {
                             IconButton(
                               icon: const Icon(Icons.edit_outlined,
                                   color: AppColors.brassSoft),
-                              onPressed: () => showExpenseFormSheet(context,
-                                  existing: liveExpense),
+                              onPressed: () =>
+                                  showExpenseFormSheet(context,
+                                      existing: liveExpense),
                               tooltip: 'Edit',
                             ),
                           IconButton(
@@ -190,26 +201,32 @@ class ExpenseDetailScreen extends StatelessWidget {
                                 Container(
                                   padding: EdgeInsets.all(12.r),
                                   decoration: BoxDecoration(
-                                    color: AppColors.brass.withValues(alpha: 0.1),
+                                    color: isFullySettled
+                                        ? AppColors.sage.withValues(alpha: 0.15)
+                                        : AppColors.brass.withValues(alpha: 0.1),
                                     shape: BoxShape.circle,
                                   ),
                                   child: Icon(
-                                    liveExpense.isSettlement
-                                        ? Icons.handshake
+                                    isFullySettled
+                                        ? Icons.check_circle
                                         : Icons.receipt_long,
-                                    color: AppColors.brass,
+                                    color: isFullySettled
+                                        ? AppColors.sage
+                                        : AppColors.brass,
                                     size: 28.r,
                                   ),
                                 ),
                                 8.verticalSpace,
                                 Text(
-                                  liveExpense.isSettlement
-                                      ? 'SETTLEMENT RECORD'
-                                      : 'SPLIT EXPENSE',
+                                  isFullySettled
+                                      ? 'FULLY SETTLED'
+                                      : '$settledCount/$totalParticipants SETTLED',
                                   style: TextStyle(
                                     fontSize: 10.sp,
                                     fontWeight: FontWeight.w900,
-                                    color: AppColors.brass,
+                                    color: isFullySettled
+                                        ? AppColors.sage
+                                        : AppColors.brass,
                                     letterSpacing: 2,
                                   ),
                                 ),
@@ -276,7 +293,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                           Row(
                             children: List.generate(
                               15,
-                              (index) => Expanded(
+                                  (index) => Expanded(
                                 child: Container(
                                   margin: EdgeInsets.symmetric(horizontal: 2.w),
                                   height: 4.h,
@@ -300,7 +317,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'BREAKDOWN',
+                          'BREAKDOWN & SETTLEMENTS',
                           style: TextStyle(
                             fontSize: 11.sp,
                             fontWeight: FontWeight.w900,
@@ -309,7 +326,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '$totalParticipants MEMBERS',
+                          '$settledCount/$totalParticipants PAID',
                           style: TextStyle(
                             fontSize: 10.sp,
                             fontWeight: FontWeight.w800,
@@ -320,76 +337,126 @@ class ExpenseDetailScreen extends StatelessWidget {
                     ),
                     16.verticalSpace,
 
-                    // Participant "Line Items"
+                    // Participant "Line Items" with Paid/Pending Status
                     ...splitParticipants.map((person) {
                       final isPayer = person.id == liveExpense.payerId;
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
+                      final isSettled = liveExpense.isPersonPaid(person.id);
 
-                      return Container(
-                        margin: EdgeInsets.only(bottom: 12.h),
-                        padding: EdgeInsets.all(16.w),
-                        decoration: BoxDecoration(
-                          color: isMe
-                              ? AppColors.paper
-                              : AppColors.paper.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(16.r),
-                          border: isMe
-                              ? Border.all(color: AppColors.brass, width: 1.5)
-                              : null,
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 18.r,
-                              backgroundColor: person.color,
-                              child: Text(
-                                person.name[0].toUpperCase(),
-                                style: TextStyle(
-                                    fontSize: 13.sp,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold),
+                      return GestureDetector(
+                        onTap: (canToggle && !isPayer)
+                            ? () {
+                          provider.togglePersonSettlement(
+                              liveExpense.id, person.id);
+                        }
+                            : null,
+                        child: Container(
+                          margin: EdgeInsets.only(bottom: 12.h),
+                          padding: EdgeInsets.all(16.w),
+                          decoration: BoxDecoration(
+                            color: isMe
+                                ? AppColors.paper
+                                : AppColors.paper.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(16.r),
+                            border: isMe
+                                ? Border.all(color: AppColors.brass, width: 1.5)
+                                : null,
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 18.r,
+                                backgroundColor: person.color,
+                                child: Text(
+                                  person.name[0].toUpperCase(),
+                                  style: TextStyle(
+                                      fontSize: 13.sp,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold),
+                                ),
                               ),
-                            ),
-                            16.horizontalSpace,
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              16.horizontalSpace,
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isMe ? 'YOU' : person.name.toUpperCase(),
+                                      style: TextStyle(
+                                          fontSize: 13.sp,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.ink),
+                                    ),
+                                    4.verticalSpace,
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 8.w, vertical: 2.h),
+                                          decoration: BoxDecoration(
+                                            color: isSettled
+                                                ? AppColors.sage.withValues(alpha: 0.15)
+                                                : AppColors.brass.withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(6.r),
+                                          ),
+                                          child: Text(
+                                            isSettled ? 'PAID' : 'PENDING',
+                                            style: TextStyle(
+                                              fontSize: 9.sp,
+                                              fontWeight: FontWeight.w900,
+                                              color: isSettled
+                                                  ? AppColors.sage
+                                                  : AppColors.brass,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isPayer) ...[
+                                          6.horizontalSpace,
+                                          Text(
+                                            '• PAID AMOUNT',
+                                            style: TextStyle(
+                                              fontSize: 9.sp,
+                                              color: AppColors.slate,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text(
-                                    isMe ? 'YOU' : person.name.toUpperCase(),
+                                    fmtCurrency(share,
+                                        provider.currentGroup!.currency),
                                     style: TextStyle(
-                                        fontSize: 13.sp,
-                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14.sp,
+                                        fontWeight: FontWeight.w900,
                                         color: AppColors.ink),
                                   ),
-                                  if (isPayer)
+                                  if (canToggle && !isPayer)
                                     Padding(
-                                      padding: EdgeInsets.only(top: 2.h),
+                                      padding: EdgeInsets.only(top: 4.h),
                                       child: Text(
-                                        'PAID THE AMOUNT',
+                                        isSettled ? 'Tap to mark pending' : 'Tap to mark paid',
                                         style: TextStyle(
-                                          fontSize: 9.sp,
-                                          color: AppColors.brass,
-                                          fontWeight: FontWeight.w900,
+                                          fontSize: 8.sp,
+                                          color: AppColors.slate,
                                         ),
                                       ),
                                     ),
                                 ],
                               ),
-                            ),
-                            Text(
-                              fmtCurrency(share,
-                                  provider.currentGroup!.currency),
-                              style: TextStyle(
-                                  fontSize: 14.sp,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.ink),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     }),
+
                     40.verticalSpace,
                   ],
                 ),

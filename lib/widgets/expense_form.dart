@@ -72,7 +72,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
     setState(() {}); // Rebuild to update the sum indicator
   }
 
-  void _syncSelectionWith(List<Person> people) {
+  void _syncSelectionWith(List<Person> people, SplitProvider provider) {
     final ids = people.map((p) => p.id).toSet();
 
     // Only auto-default to "everyone" for a brand new expense. When
@@ -88,10 +88,14 @@ class _ExpenseFormState extends State<ExpenseForm> {
     }
     _prefilled = true;
 
-    _payerId ??= people.isNotEmpty ? people.first.id : null;
-    if (_payerId != null && !ids.contains(_payerId)) {
-      _payerId = people.isNotEmpty ? people.first.id : null;
+    if (!widget.isEditing) {
+      // Payer is locked to the signed-in user's own member entry.
+      final myPerson = provider.personByUid(provider.uid);
+      _payerId = myPerson?.id;
     }
+    // When editing, the payer is whoever originally paid — it's shown
+    // locked and must never be reassigned here (even if they've since been
+    // archived from the active list).
 
     for (var id in _splitSelection) {
       if (!_customSplitCtrls.containsKey(id)) {
@@ -124,20 +128,20 @@ class _ExpenseFormState extends State<ExpenseForm> {
 
     final error = widget.isEditing
         ? provider.editExpense(
-            id: widget.existingExpense!.id,
-            desc: _descCtrl.text,
-            amount: totalAmount,
-            payerId: _payerId,
-            splitWith: _splitSelection,
-            customSplits: customSplits,
-          )
+      id: widget.existingExpense!.id,
+      desc: _descCtrl.text,
+      amount: totalAmount,
+      payerId: _payerId,
+      splitWith: _splitSelection,
+      customSplits: customSplits,
+    )
         : provider.addExpense(
-            desc: _descCtrl.text,
-            amount: totalAmount,
-            payerId: _payerId,
-            splitWith: _splitSelection,
-            customSplits: customSplits,
-          );
+      desc: _descCtrl.text,
+      amount: totalAmount,
+      payerId: _payerId,
+      splitWith: _splitSelection,
+      customSplits: customSplits,
+    );
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -179,7 +183,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
     final people = provider.people;
-    _syncSelectionWith(people);
+    _syncSelectionWith(people, provider);
 
     final totalAmount = double.tryParse(_amountCtrl.text.trim()) ?? 0.0;
     final allocated = _currentAllocatedSum;
@@ -202,7 +206,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
               child: TextField(
                 controller: _amountCtrl,
                 keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                const TextInputType.numberWithOptions(decimal: true),
                 style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
                 decoration: AppTheme.inputDecoration(
                     'Amount (${provider.currentGroup?.currency ?? 'AED'})'),
@@ -210,24 +214,30 @@ class _ExpenseFormState extends State<ExpenseForm> {
             ),
             8.horizontalSpace,
             Expanded(
-              child: DropdownButtonFormField<int>(
-                initialValue: _payerId,
-                decoration: AppTheme.inputDecoration('Paid by'),
-                style: TextStyle(color: AppColors.ink, fontSize: 13.5.sp),
-                dropdownColor: Colors.white,
-                items: people
-                    .map(
-                      (p) => DropdownMenuItem(
-                        value: p.id,
-                        child: Text(
-                          p.name,
-                          style:
-                              TextStyle(fontSize: 13.sp, color: AppColors.ink),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 14.h),
+                decoration: BoxDecoration(
+                  color: AppColors.paperDim,
+                  borderRadius: BorderRadius.circular(12.r),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.person, size: 16.r, color: AppColors.slate),
+                    8.horizontalSpace,
+                    Expanded(
+                      child: Text(
+                        'Paid by: ${provider.personById(_payerId ?? -1)?.name ?? 'You'}',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13.sp,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.ink,
                         ),
                       ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() => _payerId = v),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -277,11 +287,11 @@ class _ExpenseFormState extends State<ExpenseForm> {
                   border: Border.all(color: on ? AppColors.ink : AppColors.line),
                   boxShadow: on
                       ? [
-                          BoxShadow(
-                              color: AppColors.ink.withValues(alpha: 0.2),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2))
-                        ]
+                    BoxShadow(
+                        color: AppColors.ink.withValues(alpha: 0.2),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2))
+                  ]
                       : null,
                 ),
                 child: Text(
@@ -319,16 +329,16 @@ class _ExpenseFormState extends State<ExpenseForm> {
                       isSettled
                           ? 'Matches total!'
                           : (allocated > totalAmount
-                              ? 'Over by ${fmtCurrency(allocated - totalAmount, provider.currentGroup?.currency ?? 'AED')}'
-                              : 'Remaining: ${fmtCurrency(totalAmount - allocated, provider.currentGroup?.currency ?? 'AED')}'),
+                          ? 'Over by ${fmtCurrency(allocated - totalAmount, provider.currentGroup?.currency ?? 'AED')}'
+                          : 'Remaining: ${fmtCurrency(totalAmount - allocated, provider.currentGroup?.currency ?? 'AED')}'),
                       style: TextStyle(
                           fontSize: 12.sp,
                           fontWeight: FontWeight.bold,
                           color: isSettled
                               ? AppColors.sage
                               : (allocated > totalAmount
-                                  ? AppColors.rust
-                                  : AppColors.slate)),
+                              ? AppColors.rust
+                              : AppColors.slate)),
                     ),
                   ],
                 ),
@@ -343,8 +353,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
                     color: isSettled
                         ? AppColors.sage
                         : (allocated > totalAmount
-                            ? AppColors.rust
-                            : AppColors.brass),
+                        ? AppColors.rust
+                        : AppColors.brass),
                     minHeight: 6.h,
                   ),
                 ),
@@ -354,7 +364,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
           12.verticalSpace,
           ..._splitSelection.map((id) {
             final person = people.firstWhere(
-              (p) => p.id == id,
+                  (p) => p.id == id,
               orElse: () => provider.personById(id) ??
                   Person(id: id, name: '?', color: AppColors.slate),
             );
@@ -384,12 +394,12 @@ class _ExpenseFormState extends State<ExpenseForm> {
                     child: TextField(
                       controller: _customSplitCtrls[id],
                       keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      const TextInputType.numberWithOptions(decimal: true),
                       style: TextStyle(fontSize: 13.sp, color: AppColors.ink),
                       textAlign: TextAlign.right,
                       decoration: AppTheme.inputDecoration('0.00').copyWith(
                         contentPadding:
-                            EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
+                        EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
                       ),
                     ),
                   ),

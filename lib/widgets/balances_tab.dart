@@ -207,7 +207,7 @@ class BalancesTab extends StatelessWidget {
             ),
           ),
         ),
-        
+
         // Bottom Action Button — only settles *your own* debts, never an
         // arbitrary pair in the group that may have nothing to do with you.
         if (myId != null && pairs.any((pb) => pb.debtorId == myId))

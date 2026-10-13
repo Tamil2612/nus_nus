@@ -1,7 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../data/member_directory_repository.dart';
 import '../models/app_user.dart';
+import '../services/notification_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -34,9 +35,13 @@ class AuthProvider extends ChangeNotifier {
   }
 
   User? get currentUser => _user;
+
   AppUser? get appUser => _appUser;
+
   bool get isSignedIn => _user != null;
+
   bool get isBusy => _isBusy;
+
   String? get errorMessage => _errorMessage;
 
   void _setBusy(bool value) {
@@ -45,6 +50,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchAppUser(String uid) async {
+    NotificationService.instance.initialize(uid);
     final profile = await MemberDirectoryRepository.instance.fetchByUid(uid);
     if (profile != null) {
       _appUser = profile;
@@ -84,6 +90,7 @@ class AuthProvider extends ChangeNotifier {
               name: name.trim(),
               email: email.trim(),
               phoneNumber: phoneNumber),
+          fcmToken: 'token_${uid}_${defaultTargetPlatform.name}',
         );
       }
       _setBusy(false);
@@ -105,10 +112,21 @@ class AuthProvider extends ChangeNotifier {
     _errorMessage = null;
     _setBusy(true);
     try {
-      await _auth.signInWithEmailAndPassword(
+      final credential = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
+      final uid = credential.user?.uid;
+      if (uid != null) {
+        await MemberDirectoryRepository.instance.upsertProfile(
+          AppUser(
+            uid: uid,
+            name: credential.user?.displayName ?? '',
+            email: credential.user?.email ?? email.trim(),
+          ),
+          fcmToken: 'token_${uid}_${defaultTargetPlatform.name}',
+        );
+      }
       _setBusy(false);
       return null;
     } on FirebaseAuthException catch (e) {
