@@ -606,10 +606,9 @@ class SplitProvider extends ChangeNotifier {
   /// instead of zeroing it. [amount] is only validated — the amount to pay
   /// is whatever the Balances tab showed for the pair.
   ///
-  /// This is the single place that decides who's allowed to confirm a
-  /// settlement — both the per-group Balances tab and the cross-group
-  /// Overview's "settle all dues" go through it: only the group's creator
-  /// or the person actually being paid can confirm.
+  /// This is the single place that validates pairwise settlement requests.
+  /// Either linked participant in the debtor-creditor pair may confirm; the
+  /// callable revalidates the balance and atomically records the allocation.
   Future<String?> settleUp(int fromId, int toId, double amount, {String? groupId}) async {
     final targetId = groupId ?? currentGroup?.id;
     if (targetId == null) return 'Select a group first.';
