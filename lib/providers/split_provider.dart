@@ -610,7 +610,7 @@ class SplitProvider extends ChangeNotifier {
   /// settlement — both the per-group Balances tab and the cross-group
   /// Overview's "settle all dues" go through it: only the group's creator
   /// or the person actually being paid can confirm.
-  String? settleUp(int fromId, int toId, double amount, {String? groupId}) {
+  Future<String?> settleUp(int fromId, int toId, double amount, {String? groupId}) async {
     final targetId = groupId ?? currentGroup?.id;
     if (targetId == null) return 'Select a group first.';
     if (!amount.isFinite || amount <= 0 || fromId == toId) {
@@ -639,10 +639,15 @@ class SplitProvider extends ChangeNotifier {
     }
     if (amount - pair.first.owedAmount > 0.005) return 'Settlement amount exceeds the current outstanding balance.';
     // Server recomputes the net and atomically allocates this amount to existing shares.
-    _persist(FirestoreRepository.instance.recordPairSettlement(
-      groupId: group.id, fromId: fromId, toId: toId, amount: amount,
-    ));
-    return null;
+    try {
+      await FirestoreRepository.instance.recordPairSettlement(
+        groupId: group.id, fromId: fromId, toId: toId, amount: amount,
+      );
+      return null;
+    } catch (error) {
+      debugPrint('SplitProvider: settlement failed: $error');
+      return 'Could not record settlement. Refresh and try again.';
+    }
   }
 
   /// deleting an expense someone else logged (or your own) is a destructive
@@ -968,7 +973,7 @@ class SplitProvider extends ChangeNotifier {
       final fromId = contrib.amount > 0 ? contrib.counterpartId : contrib.myId;
       final toId = contrib.amount > 0 ? contrib.myId : contrib.counterpartId;
 
-      final error = settleUp(
+      final error = await settleUp(
         fromId,
         toId,
         contrib.amount.abs(),
