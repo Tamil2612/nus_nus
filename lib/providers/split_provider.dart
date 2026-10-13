@@ -767,7 +767,6 @@ class SplitProvider extends ChangeNotifier {
       return; // Cannot toggle/revert the person who paid
     }
 
-    final payerPerson = personById(expense.payerId);
     final isExpenseCreator = expense.addedBy == _uid;
     // Only the person who logged this expense can change its paid/pending flags.
     if (!isExpenseCreator) {
