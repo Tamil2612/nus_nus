@@ -619,13 +619,12 @@ class SplitProvider extends ChangeNotifier {
       return 'Could not find one of the people in this settlement.';
     }
 
-    // Permission check: only the group owner OR the person being paid
-    // (creditor) can officially record this settlement — a debtor can't
-    // unilaterally mark their own debt as paid.
+    // Bulk settlement changes several expenses at once, so only the group
+    // owner can confirm it. Individual shares can still be toggled by the
+    // expense author/payer through togglePersonSettlement().
     final isOwner = group.ownerId == _uid;
-    final isCreditor = toPerson.linkedUserId == _uid;
-    if (!isOwner && !isCreditor) {
-      return 'Only ${toPerson.name} or the group creator can settle this up.';
+    if (!isOwner) {
+      return 'Only the group creator can confirm a balance settlement.';
     }
 
     // Settlement status is all-or-nothing per expense share. Never let a
