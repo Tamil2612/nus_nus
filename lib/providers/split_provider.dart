@@ -661,7 +661,7 @@ class SplitProvider extends ChangeNotifier {
 
     final updatedList = <Expense>[];
     final changed = <Expense>[];
-    for (final e of current) {
+    for (final e in current) {
       Set<int>? newSettled;
       if (!e.isSettlement) {
         if (e.payerId == toId &&
