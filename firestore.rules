@@ -66,6 +66,7 @@ service cloud.firestore {
             request.resource.data.splitMap is map &&
             request.resource.data.splitMap.keys().size() > 0 &&
             request.resource.data.settledBy is list &&
+            request.resource.data.settledAmounts is map &&
             request.resource.data.isSettlement == false &&
             request.resource.data.addedBy == request.auth.uid;
         }
@@ -84,6 +85,8 @@ service cloud.firestore {
             request.resource.data.payerId == resource.data.payerId &&
             request.resource.data.isSettlement == resource.data.isSettlement &&
             request.resource.data.createdAt == resource.data.createdAt &&
+            request.resource.data.settledBy == resource.data.settledBy &&
+            request.resource.data.settledAmounts == resource.data.settledAmounts &&
             request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
             request.resource.data.amount <= 100000000 &&
@@ -92,12 +95,14 @@ service cloud.firestore {
             request.resource.data.desc.size() <= 200 &&
             request.resource.data.splitMap is map &&
             request.resource.data.splitMap.keys().size() > 0 &&
-            request.resource.data.settledBy is list
+            request.resource.data.settledBy is list &&
+            request.resource.data.settledAmounts == resource.data.settledAmounts
           ) ||
-          // Settlement flags are status tracking, not payment processing.
-          // Any group member may update settledBy status.
+          // Only the original expense logger can toggle whole-share status.
+          // Pairwise partial settlements are written by the trusted callable.
           (
             isGroupMember() &&
+            request.auth.uid == resource.data.addedBy &&
             request.resource.data.diff(resource.data)
               .affectedKeys().hasOnly(['settledBy']) &&
             request.resource.data.settledBy is list
