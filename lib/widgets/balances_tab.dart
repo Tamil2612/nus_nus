@@ -29,9 +29,9 @@ class BalancesTab extends StatelessWidget {
         title: const Text('Record settlement?',
             style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
-          'This records that ${from?.name ?? '?'} paid ${to?.name ?? '?'} '
-          '${fmtCurrency(amount, provider.currentGroup?.currency ?? 'AED')} outside the app. It just updates the ledger — '
-          'no money actually moves.',
+          'This records a net settlement between ${from?.name ?? '?'} and ${to?.name ?? '?'} '
+          'for ${fmtCurrency(amount, provider.currentGroup?.currency ?? 'AED')}. Opposing debts are offset first; '
+          'only the remaining net amount is treated as paid outside the app. No money moves inside Nus·Nus.',
           style: const TextStyle(color: AppColors.slate),
         ),
         actions: [
