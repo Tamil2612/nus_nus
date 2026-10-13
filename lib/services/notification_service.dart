@@ -48,10 +48,13 @@ class NotificationService {
       }
 
       _refreshSub = _messaging.onTokenRefresh.listen((newToken) {
+        // A refresh event can arrive after sign-out/account switching.
+        if (_activeUid != uid) return;
         _token = newToken;
         _saveToken(uid, newToken);
       });
       _foregroundSub = FirebaseMessaging.onMessage.listen((message) {
+        if (_activeUid != uid) return;
         debugPrint('Received foreground message: ${message.notification?.title}');
       });
     } catch (e) {

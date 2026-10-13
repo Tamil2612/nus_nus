@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../data/member_directory_repository.dart';
@@ -11,6 +12,7 @@ class AuthProvider extends ChangeNotifier {
   AppUser? _appUser;
   bool _isBusy = false;
   String? _errorMessage;
+  StreamSubscription<User?>? _userChangesSub;
 
   AuthProvider() {
     _user = _auth.currentUser;
@@ -23,7 +25,7 @@ class AuthProvider extends ChangeNotifier {
     // sign-in/sign-out and would leave displayName looking empty
     // anywhere it's read (e.g. group ownership labels) until the next
     // full sign-in.
-    _auth.userChanges().listen((user) {
+    _userChangesSub = _auth.userChanges().listen((user) {
       _user = user;
       if (user != null) {
         _fetchAppUser(user.uid);
@@ -50,11 +52,22 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchAppUser(String uid) async {
-    final profile = await MemberDirectoryRepository.instance.fetchByUid(uid);
-    if (profile != null) {
+    try {
+      final profile = await MemberDirectoryRepository.instance.fetchByUid(uid);
+      // A slower request from a previous account must not overwrite the
+      // currently signed-in user's profile.
+      if (_user?.uid != uid || profile == null) return;
       _appUser = profile;
       notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to load user profile: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    _userChangesSub?.cancel();
+    super.dispose();
   }
 
   Future<String?> register({
@@ -237,16 +250,21 @@ class AuthProvider extends ChangeNotifier {
       await _user?.reload();
       _user = _auth.currentUser;
 
-      // Update Firestore with the NEW email immediately so the app shows it
-      await MemberDirectoryRepository.instance.upsertProfile(
-        AppUser(
-          uid: _user!.uid,
-          name: _user!.displayName ?? '',
-          email: newEmail.trim(),
-          phoneNumber: _appUser?.phoneNumber,
-        ),
-      );
-      await _fetchAppUser(_user!.uid);
+      // verifyBeforeUpdateEmail sends a verification link; it does not
+      // immediately change FirebaseAuth's email. Keep the directory aligned
+      // with the currently verified Auth email until the user completes it.
+      final currentEmail = _user?.email;
+      if (currentEmail != null) {
+        await MemberDirectoryRepository.instance.upsertProfile(
+          AppUser(
+            uid: _user!.uid,
+            name: _user!.displayName ?? '',
+            email: currentEmail,
+            phoneNumber: _appUser?.phoneNumber,
+          ),
+        );
+        await _fetchAppUser(_user!.uid);
+      }
 
       _setBusy(false);
       return null;

@@ -47,6 +47,7 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
   void dispose() {
     promptController.dispose();
     _scrollController.dispose();
+    _chatScrollController.dispose();
     super.dispose();
   }
 
@@ -74,28 +75,35 @@ class _AiExpenseScreenState extends State<AiExpenseScreen> {
       }
     }
 
-    // If the AI couldn't identify the payer, assume it's the signed-in user.
-    // (addExpense only lets you log splits you paid yourself.)
-    payerId ??= provider.personByUid(provider.uid)?.id;
+    if (payerId == null) {
+      _showSnack('The AI could not identify the payer. Edit the prompt to use an exact group member name, then analyse again.');
+      return;
+    }
 
     final Map<int, double> customSplits = {};
     final Set<int> splitWith = {};
+    var validSplits = true;
 
     splitMapRaw.forEach((name, amount) {
-      for (final p in _selectedGroup!.members) {
-        if (p.name.toLowerCase() == name.toLowerCase()) {
-          splitWith.add(p.id);
-          customSplits[p.id] = (amount as num).toDouble();
-          break;
-        }
+      final matches = _selectedGroup!.members
+          .where((p) => p.name.trim().toLowerCase() == name.trim().toLowerCase())
+          .toList();
+      if (matches.length != 1 || amount is! num ||
+          !amount.toDouble().isFinite || amount < 0) {
+        validSplits = false;
+        return;
       }
+      final person = matches.single;
+      splitWith.add(person.id);
+      customSplits[person.id] = amount.toDouble();
     });
 
-    // If splitWith is empty (AI didn't use group names), default to everyone
-    if (splitWith.isEmpty) {
-      for (final p in _selectedGroup!.members) {
-        splitWith.add(p.id);
-      }
+    final total = (result['amount'] as num?)?.toDouble();
+    final splitTotal = customSplits.values.fold<double>(0, (sum, value) => sum + value);
+    if (!validSplits || splitWith.isEmpty || total == null ||
+        !total.isFinite || total <= 0 || (splitTotal - total).abs() > 0.02) {
+      _showSnack('The AI returned an invalid split. Please edit the prompt and analyse again.');
+      return;
     }
 
     // addExpense writes to the provider's current group, so make sure that's

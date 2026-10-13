@@ -24,11 +24,18 @@ exports.parseBillWithAI = functions.https.onCall(async (data, context) => {
 
   const { imageBase64, instructions, memberNames } = data;
 
-  // Validate input
-  if (!instructions || !memberNames || !Array.isArray(memberNames)) {
+  // Bound untrusted input before sending it to a paid external model.
+  if (typeof instructions !== 'string' || instructions.trim().length === 0 ||
+      instructions.length > 4000 ||
+      !Array.isArray(memberNames) || memberNames.length < 1 ||
+      memberNames.length > 50 ||
+      memberNames.some((name) => typeof name !== 'string' ||
+        name.trim().length === 0 || name.length > 80) ||
+      (imageBase64 != null && (typeof imageBase64 !== 'string' ||
+        imageBase64.length > 8 * 1024 * 1024))) {
     throw new functions.https.HttpsError(
       'invalid-argument',
-      'Missing required fields: instructions and memberNames are required.'
+      'Provide instructions (up to 4,000 characters), 1–50 valid member names, and an optional image under 8 MB.'
     );
   }
 
@@ -60,15 +67,12 @@ JSON Schema:
 `;
 
     // Generate content
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          data: imageBase64,
-          mimeType: "image/jpeg"
-        }
-      },
-      prompt
-    ]);
+    const parts = [];
+    if (imageBase64) {
+      parts.push({ inlineData: { data: imageBase64, mimeType: 'image/jpeg' } });
+    }
+    parts.push(prompt);
+    const result = await model.generateContent(parts);
 
     const response = await result.response;
     const text = response.text();
@@ -87,19 +91,44 @@ JSON Schema:
     const parsedResult = JSON.parse(cleanJson);
 
     // Validate response structure
-    if (!parsedResult.description ||
+    if (typeof parsedResult.description !== 'string' ||
+        parsedResult.description.trim().length === 0 ||
+        parsedResult.description.length > 200 ||
         typeof parsedResult.amount !== 'number' ||
-        !parsedResult.payerName ||
+        !Number.isFinite(parsedResult.amount) ||
+        parsedResult.amount <= 0 ||
+        parsedResult.amount > 100000000 ||
+        typeof parsedResult.payerName !== 'string' ||
+        !memberNames.some((name) => name.toLowerCase() === parsedResult.payerName.trim().toLowerCase()) ||
         !parsedResult.splitMap ||
-        typeof parsedResult.splitMap !== 'object') {
-      throw new Error('Invalid response format from AI');
+        typeof parsedResult.splitMap !== 'object' ||
+        Array.isArray(parsedResult.splitMap)) {
+      throw new Error('AI response contains invalid expense fields or an unknown payer');
+    }
+
+    const normalizedSplits = {};
+    let splitTotal = 0;
+    const validNames = new Map(memberNames.map((name) => [name.toLowerCase(), name]));
+    for (const [rawName, rawAmount] of Object.entries(parsedResult.splitMap)) {
+      const canonicalName = validNames.get(rawName.trim().toLowerCase());
+      if (!canonicalName || typeof rawAmount !== 'number' ||
+          !Number.isFinite(rawAmount) || rawAmount < 0 || rawAmount > parsedResult.amount) {
+        throw new Error('AI response contains an unknown member or invalid split amount');
+      }
+      normalizedSplits[canonicalName] = (normalizedSplits[canonicalName] || 0) + rawAmount;
+      splitTotal += rawAmount;
+    }
+    if (Object.keys(normalizedSplits).length === 0 ||
+        !Object.values(normalizedSplits).some((amount) => amount > 0) ||
+        Math.abs(splitTotal - parsedResult.amount) > 0.02) {
+      throw new Error('AI split amounts do not add up to the receipt total');
     }
 
     return {
-      description: parsedResult.description,
+      description: parsedResult.description.trim(),
       amount: parsedResult.amount,
-      payerName: parsedResult.payerName,
-      splitMap: parsedResult.splitMap
+      payerName: memberNames.find((name) => name.toLowerCase() === parsedResult.payerName.trim().toLowerCase()),
+      splitMap: normalizedSplits
     };
   } catch (error) {
     console.error('Error in parseBillWithAI:', error);

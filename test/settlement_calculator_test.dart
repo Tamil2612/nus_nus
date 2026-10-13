@@ -174,5 +174,44 @@ void main() {
       final pairBalances = SettlementCalculator.computePairBalances(entries);
       expect(pairBalances, isEmpty);
     });
+
+    test('settled share is excluded from the outstanding balance', () {
+      final expenses = [
+        Expense(
+          id: 'e-settled',
+          desc: 'Dinner',
+          amount: 100,
+          payerId: 1,
+          splitMap: {1: 40, 2: 60},
+          settledBy: {1, 2},
+        ),
+      ];
+
+      final entries = SettlementCalculator.deriveLedgerEntries(expenses);
+      expect(entries, isEmpty);
+      expect(SettlementCalculator.computePairBalances(entries), isEmpty);
+    });
+
+    test('settling one participant does not clear another participant share', () {
+      final expenses = [
+        Expense(
+          id: 'e-one-settled',
+          desc: 'Dinner',
+          amount: 100,
+          payerId: 1,
+          splitMap: {1: 40, 2: 30, 3: 30},
+          settledBy: {1, 2},
+        ),
+      ];
+
+      final balances = SettlementCalculator.computePairBalances(
+        SettlementCalculator.deriveLedgerEntries(expenses),
+      );
+
+      expect(balances.length, 1);
+      expect(balances.single.debtorId, 3);
+      expect(balances.single.creditorId, 1);
+      expect(balances.single.owedAmount, closeTo(30, 0.01));
+    });
   });
 }
