@@ -46,3 +46,7 @@ app.*.map.json
 
 # Archives
 *.zip
+
+# Tooling output / local notes that should not be versioned
+.artifacts/
+.firebase/

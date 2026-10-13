@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   provider: ^6.1.5+1
   flutter_screenutil: ^5.9.3
-  image_picker: ^1.2.3
+  image_picker: ^1.2.4
   firebase_core: ^4.15.0
   firebase_auth: ^6.7.0
   cloud_firestore: ^6.10.0
@@ -28,8 +28,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-      - assets/icon/
-      - assets/icon/nus_nus_icon.png
+    - assets/icon/
+    - assets/icon/nus_nus_icon.png
 
 flutter_launcher_icons:
   android: "launcher_icon"
@@ -39,8 +39,8 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: "assets/icon/nus_nus_icon.png"
-    background_color: "#hexcode"
-    theme_color: "#hexcode"
+    background_color: "#000000"
+    theme_color: "#000000"
   windows:
     generate: true
     image_path: "assets/icon/nus_nus_icon.png"
@@ -48,4 +48,3 @@ flutter_launcher_icons:
   macos:
     generate: true
     image_path: "assets/icon/nus_nus_icon.png"
-

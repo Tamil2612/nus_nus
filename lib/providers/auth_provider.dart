@@ -50,7 +50,6 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchAppUser(String uid) async {
-    NotificationService.instance.initialize(uid);
     final profile = await MemberDirectoryRepository.instance.fetchByUid(uid);
     if (profile != null) {
       _appUser = profile;
@@ -90,7 +89,6 @@ class AuthProvider extends ChangeNotifier {
               name: name.trim(),
               email: email.trim(),
               phoneNumber: phoneNumber),
-          fcmToken: 'token_${uid}_${defaultTargetPlatform.name}',
         );
       }
       _setBusy(false);
@@ -124,7 +122,6 @@ class AuthProvider extends ChangeNotifier {
             name: credential.user?.displayName ?? '',
             email: credential.user?.email ?? email.trim(),
           ),
-          fcmToken: 'token_${uid}_${defaultTargetPlatform.name}',
         );
       }
       _setBusy(false);
@@ -139,7 +136,47 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    final uid = _user?.uid;
+    if (uid != null) await NotificationService.instance.clear(uid);
     await _auth.signOut();
+  }
+
+  /// Returns null on success, or a user-facing error message.
+  Future<String?> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyError(e);
+    } catch (_) {
+      return 'Something went wrong. Please try again.';
+    }
+  }
+
+  /// Deletes the signed-in account (requires the current password).
+  /// NOTE: groups this user owns are not touched — decide whether to delete
+  /// them or transfer ownership before exposing this in the UI.
+  Future<String?> deleteAccount(String currentPassword) async {
+    final user = _user;
+    final email = user?.email;
+    if (user == null || email == null) return 'No user signed in.';
+    _setBusy(true);
+    try {
+      await user.reauthenticateWithCredential(
+        EmailAuthProvider.credential(email: email, password: currentPassword),
+      );
+      await NotificationService.instance.clear(user.uid);
+      await MemberDirectoryRepository.instance.deleteProfile(user.uid);
+      await user.delete();
+      _setBusy(false);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      _setBusy(false);
+      return _friendlyError(e);
+    } catch (_) {
+      _setBusy(false);
+      return 'Failed to delete account.';
+    }
   }
 
   Future<void> reloadUser() async {

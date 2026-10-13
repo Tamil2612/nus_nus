@@ -55,7 +55,7 @@ class Group {
   List<String> get memberUids {
     final ids = <String>{ownerId};
     for (final p in members) {
-      if (p.linkedUserId != null) ids.add(p.linkedUserId!);
+      if (!p.archived && p.linkedUserId != null) ids.add(p.linkedUserId!);
     }
     return ids.toList();
   }
@@ -82,28 +82,28 @@ class Group {
   /// Metadata only — deliberately excludes [expenses], which live in the
   /// subcollection and are written there directly instead.
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'currency': currency,
-        'isPersonal': isPersonal,
-        'ownerId': ownerId,
-        'ownerName': ownerName,
-        'memberUids': memberUids,
-        'members': members.map((p) => p.toJson()).toList(),
-      };
+    'name': name,
+    'currency': currency,
+    'isPersonal': isPersonal,
+    'ownerId': ownerId,
+    'ownerName': ownerName,
+    'memberUids': memberUids,
+    'members': members.map((p) => p.toJson()).toList(),
+  };
 
   /// [id] is passed separately rather than read from [json] because it
   /// comes from the Firestore document id, not a field inside the
   /// document body. [expenses] always starts empty here — [SplitProvider]
   /// fills it in from the live subcollection stream.
   factory Group.fromJson(String id, Map<String, dynamic> json) => Group(
-        id: id,
-        name: json['name'] as String? ?? 'Untitled group',
-        currency: json['currency'] as String? ?? 'AED',
-        isPersonal: json['isPersonal'] as bool? ?? false,
-        ownerId: json['ownerId'] as String? ?? '',
-        ownerName: json['ownerName'] as String? ?? '',
-        members: (json['members'] as List? ?? [])
-            .map((m) => Person.fromJson(Map<String, dynamic>.from(m as Map)))
-            .toList(),
-      );
+    id: id,
+    name: json['name'] as String? ?? 'Untitled group',
+    currency: json['currency'] as String? ?? 'AED',
+    isPersonal: json['isPersonal'] as bool? ?? false,
+    ownerId: json['ownerId'] as String? ?? '',
+    ownerName: json['ownerName'] as String? ?? '',
+    members: (json['members'] as List? ?? [])
+        .map((m) => Person.fromJson(Map<String, dynamic>.from(m as Map)))
+        .toList(),
+  );
 }

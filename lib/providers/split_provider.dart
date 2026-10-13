@@ -40,6 +40,32 @@ class SplitProvider extends ChangeNotifier {
 
   StreamSubscription<List<Group>>? _groupsSub;
 
+  bool _personalEnsured = false;
+  String? _writeError;
+
+  /// Returns (and clears) the last failed-save message so the UI can show it.
+  String? takeWriteError() {
+    final e = _writeError;
+    _writeError = null;
+    return e;
+  }
+
+  /// Runs a Firestore write whose result the UI doesn't wait for. A failure
+  /// no longer goes unhandled: it records a message and re-subscribes so the
+  /// local optimistic state is replaced by what the server really has.
+  void _persist(Future<void> write, {bool resync = true}) {
+    write.catchError((Object e) {
+      debugPrint('SplitProvider: save failed: $e');
+      _writeError = "Couldn't save your last change. It was reverted.";
+      final uid = _uid;
+      if (resync && uid != null) {
+        _uid = null;
+        setUserId(uid);
+      }
+      notifyListeners();
+    });
+  }
+
   String? get uid => _uid;
   bool get isLoading => _isLoading;
 
@@ -58,6 +84,7 @@ class SplitProvider extends ChangeNotifier {
     _expenseSubs.clear();
     _expensesByGroup.clear();
     _myDisplayName = null;
+    _personalEnsured = false;
 
     if (uid == null) {
       _groupMeta = [];
@@ -271,11 +298,13 @@ class SplitProvider extends ChangeNotifier {
     _rebuildGroups();
     _currentGroupId = group.id;
     notifyListeners();
-    FirestoreRepository.instance.saveGroupMeta(group);
+    _persist(FirestoreRepository.instance.saveGroupMeta(group));
   }
 
   void _ensurePersonalGroupExists(String uid, List<Group> loaded) {
     if (loaded.any((g) => g.isPersonal && g.ownerId == uid)) return;
+    if (_personalEnsured) return;
+    _personalEnsured = true;
 
     final resolvedOwnerName =
     (_myDisplayName != null && _myDisplayName!.isNotEmpty)
@@ -299,8 +328,10 @@ class SplitProvider extends ChangeNotifier {
       expenses: const [],
     );
     // Don't need to add to local _groupMeta yet, the stream will catch it
-    // after Firestore write.
-    FirestoreRepository.instance.saveGroupMeta(group);
+    // after Firestore write. Create-only, so an existing group is never overwritten.
+    FirestoreRepository.instance.ensurePersonalGroup(group).catchError((_) {
+      _personalEnsured = false; // retry on the next stream emission
+    });
   }
 
   /// Deletes a group entirely (including its people/expenses). Only the
@@ -316,7 +347,7 @@ class SplitProvider extends ChangeNotifier {
     _groupMeta = [..._groupMeta]..removeAt(idx);
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.deleteGroup(groupId);
+    _persist(FirestoreRepository.instance.deleteGroup(groupId));
   }
 
   void renameGroup(String groupId, String newName, {String? newCurrency}) {
@@ -331,7 +362,7 @@ class SplitProvider extends ChangeNotifier {
     _groupMeta[idx] = updated;
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.saveGroupMeta(updated);
+    _persist(FirestoreRepository.instance.saveGroupMeta(updated));
   }
 
   // Getters for current group data --------------------------------------
@@ -432,7 +463,7 @@ class SplitProvider extends ChangeNotifier {
     _groupMeta[_currentGroupMetaIndex] = updated;
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.saveGroupMeta(updated);
+    _persist(FirestoreRepository.instance.saveGroupMeta(updated));
   }
 
   /// Returns a `Map<int, double>` split map on success, or a `String` error
@@ -445,6 +476,13 @@ class SplitProvider extends ChangeNotifier {
     Map<int, double>? customSplits,
   }) {
     if (customSplits != null && customSplits.isNotEmpty) {
+      if (customSplits.values.any((v) => v < 0)) {
+        return "Shares can't be negative.";
+      }
+      final known = (currentGroup?.members ?? []).map((p) => p.id).toSet();
+      if (!customSplits.keys.every(known.contains)) {
+        return 'Someone in this split is not in the group.';
+      }
       double sum = customSplits.values.fold(0, (a, b) => a + b);
       if ((sum - amount).abs() > 0.01) {
         return 'Sum of splits (${fmtCurrency(sum, currency)}) must equal total (${fmtCurrency(amount, currency)})';
@@ -531,7 +569,7 @@ class SplitProvider extends ChangeNotifier {
     _expensesByGroup[group.id] = [...expenses, newExpense];
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.createExpense(group.id, newExpense);
+    _persist(FirestoreRepository.instance.createExpense(group.id, newExpense));
     return null;
   }
 
@@ -619,7 +657,8 @@ class SplitProvider extends ChangeNotifier {
     _rebuildGroups();
     notifyListeners();
     for (final e in changed) {
-      FirestoreRepository.instance.updateExpense(group.id, e);
+      _persist(FirestoreRepository.instance
+          .updateSettledBy(group.id, e.id, e.settledBy));
     }
     return null;
   }
@@ -641,7 +680,7 @@ class SplitProvider extends ChangeNotifier {
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.deleteExpense(group.id, id);
+    _persist(FirestoreRepository.instance.deleteExpense(group.id, id));
   }
 
   /// RESTRICTED TO THE CREATOR / PAYER of the expense.
@@ -712,7 +751,7 @@ class SplitProvider extends ChangeNotifier {
     _expensesByGroup[group.id] = updatedExpenses;
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.updateExpense(group.id, updatedExpense);
+    _persist(FirestoreRepository.instance.updateExpense(group.id, updatedExpense));
     return null;
   }
 
@@ -754,7 +793,8 @@ class SplitProvider extends ChangeNotifier {
     _expensesByGroup[group.id] = list;
     _rebuildGroups();
     notifyListeners();
-    FirestoreRepository.instance.updateExpense(group.id, updated);
+    _persist(FirestoreRepository.instance
+        .updateSettledBy(group.id, updated.id, updated.settledBy));
   }
 
   Expense? _expenseById(String expenseId) {
@@ -1033,4 +1073,3 @@ extension AiContextExtension on SplitProvider {
     return JsonEncoder.withIndent('  ').convert(context);
   }
 }
-

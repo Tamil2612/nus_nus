@@ -116,265 +116,6 @@ JSON Schema:
   }
 });
 
-// Helper function to calculate pairwise debts (strictly pair by pair)
-function calculateSettlements(expenses, members) {
-  const pairNet = {};
-
-  expenses.forEach(expense => {
-    const { payerName, splitMap, settledBy = [] } = expense;
-    if (!payerName || !splitMap) return;
-
-    Object.entries(splitMap).forEach(([participant, share]) => {
-      // Payer never owes themselves, and paid/settled shares are skipped
-      if (participant === payerName) return;
-      if (Array.isArray(settledBy) && settledBy.includes(participant)) return;
-      if (share <= 0.001) return;
-
-      // Directed debt: participant owes payerName 'share'
-      const p1 = participant < payerName ? participant : payerName;
-      const p2 = participant < payerName ? payerName : participant;
-      const key = `${p1}|${p2}`;
-
-      // Sign: positive means p1 owes p2
-      const sign = (participant === p1) ? 1.0 : -1.0;
-      pairNet[key] = (pairNet[key] || 0) + sign * share;
-    });
-  });
-
-  const settlements = [];
-  Object.entries(pairNet).forEach(([key, netAmount]) => {
-    if (Math.abs(netAmount) <= 0.005) return;
-    const [p1, p2] = key.split('|');
-
-    if (netAmount > 0) {
-      // p1 owes p2
-      settlements.push({
-        from: p1,
-        to: p2,
-        amount: parseFloat(netAmount.toFixed(2))
-      });
-    } else {
-      // p2 owes p1
-      settlements.push({
-        from: p2,
-        to: p1,
-        amount: parseFloat(Math.abs(netAmount).toFixed(2))
-      });
-    }
-  });
-
-  return settlements;
-}
-
-// Settlement Calculation Function
-exports.calculateSettlements = functions.https.onCall(async (data, context) => {
-  // Check authentication
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'The function must be called while authenticated.'
-    );
-  }
-
-  const { groupId } = data;
-
-  // Validate input
-  if (!groupId) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Missing required field: groupId'
-    );
-  }
-
-  try {
-    // Verify user is member of the group
-    const groupDoc = await db.collection('groups').doc(groupId).get();
-    if (!groupDoc.exists) {
-      throw new functions.https.HttpsError(
-        'not-found',
-        'Group not found'
-      );
-    }
-
-    const groupData = groupDoc.data();
-    const userId = context.auth.uid;
-
-    if (!groupData.memberUids.includes(userId)) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'User is not a member of this group'
-      );
-    }
-
-    // Fetch all expenses for the group
-    const expensesSnapshot = await db.collection('groups')
-      .doc(groupId)
-      .collection('expenses')
-      .get();
-
-    const expenses = [];
-    expensesSnapshot.forEach(doc => {
-      const expenseData = doc.data();
-      expenses.push({
-        id: doc.id,
-        amount: expenseData.amount,
-        payerName: expenseData.addedByName || expenseData.addedBy,
-        splitMap: expenseData.splitMap || {},
-        description: expenseData.description || '',
-        timestamp: expenseData.timestamp ? expenseData.timestamp.toDate() : null
-      });
-    });
-
-    // Get member names
-    const memberUids = groupData.memberUids || [];
-    const memberNames = [];
-
-    // In a real app, you'd fetch member names from user profiles
-    // For now, we'll use the UIDs as names or fetch from MemberDirectory
-    for (const uid of memberUids) {
-      if (uid === userId) {
-        // Try to get current user's display name
-        memberNames.push('You'); // Placeholder
-      } else {
-        memberNames.push(`User ${uid.substring(0, 8)}`); // Placeholder
-      }
-    }
-
-    // Calculate settlements
-    const settlements = calculateSettlements(expenses, memberNames);
-
-    return {
-      settlements,
-      expensesCount: expenses.length,
-      memberCount: memberNames.length
-    };
-  } catch (error) {
-    console.error('Error in calculateSettlements:', error);
-    if (error.code === 'permission-denied' || error.code === 'not-found') {
-      throw error;
-    }
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to calculate settlements. Please try again.'
-    );
-  }
-});
-
-// Add member to group function
-exports.addMemberToGroup = functions.https.onCall(async (data, context) => {
-  // Check authentication
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'The function must be called while authenticated.'
-    );
-  }
-
-  const { groupId, memberUid } = data;
-
-  // Validate input
-  if (!groupId || !memberUid) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Missing required fields: groupId and memberUid'
-    );
-  }
-
-  try {
-    // Verify user is owner of the group
-    const groupDoc = await db.collection('groups').doc(groupId).get();
-    if (!groupDoc.exists) {
-      throw new functions.https.HttpsError(
-        'not-found',
-        'Group not found'
-      );
-    }
-
-    const groupData = groupDoc.data();
-    const userId = context.auth.uid;
-
-    if (groupData.ownerId !== userId) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Only the group owner can add members'
-      );
-    }
-
-    // Check if member is already in group
-    if (groupData.memberUids.includes(memberUid)) {
-      throw new functions.https.HttpsError(
-        'already-exists',
-        'Member is already in the group'
-      );
-    }
-
-    // Add member to group
-    await db.collection('groups').doc(groupId).update({
-      memberUids: admin.firestore.FieldValue.arrayUnion(memberUid)
-    });
-
-    return { success: true };
-  } catch (error) {
-    console.error('Error in addMemberToGroup:', error);
-    if (error.code === 'permission-denied' ||
-        error.code === 'not-found' ||
-        error.code === 'already-exists') {
-      throw error;
-    }
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to add member to group. Please try again.'
-    );
-  }
-});
-
-// Create group function
-exports.createGroup = functions.https.onCall(async (data, context) => {
-  // Check authentication
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'The function must be called while authenticated.'
-    );
-  }
-
-  const { name, currency, description } = data;
-
-  // Validate input
-  if (!name || !currency) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Missing required fields: name and currency'
-    );
-  }
-
-  try {
-    const userId = context.auth.uid;
-
-    // Create group document
-    const groupRef = await db.collection('groups').add({
-      name: name,
-      currency: currency,
-      description: description || '',
-      ownerId: userId,
-      memberUids: [userId], // Owner is automatically a member
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    return {
-      groupId: groupRef.id,
-      success: true
-    };
-  } catch (error) {
-    console.error('Error in createGroup:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to create group. Please try again.'
-    );
-  }
-});
-
 // Query App State with AI Function
 exports.queryAppState = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
@@ -424,51 +165,57 @@ ${userQuery}
   }
 });
 
-// Send push notification when a new expense/split is created
+// Send push notification when a new expense/split is created.
+// Tokens live in users/{uid}/private/push as { tokens: [..] }.
 exports.onExpenseCreated = functions.firestore
   .document('groups/{groupId}/expenses/{expenseId}')
   .onCreate(async (snapshot, context) => {
     const groupId = context.params.groupId;
-    const expenseData = snapshot.data();
+    const expense = snapshot.data();
+    if (expense.isSettlement) return null;
 
-    const desc = expenseData.desc || 'New split';
-    const amount = expenseData.amount || 0;
-    const addedBy = expenseData.addedBy;
+    const desc = expense.desc || 'New split';
+    const amount = expense.amount || 0;
 
     try {
       const groupDoc = await db.collection('groups').doc(groupId).get();
       if (!groupDoc.exists) return null;
+      const group = groupDoc.data();
+      if (group.isPersonal) return null;
 
-      const groupData = groupDoc.data();
-      const memberUids = groupData.memberUids || [];
-      const groupName = groupData.name || 'Group';
+      const recipients = (group.memberUids || []).filter((uid) => uid !== expense.addedBy);
+      const pushRef = (uid) => db.collection('users').doc(uid).collection('private').doc('push');
+      const docs = await Promise.all(recipients.map((uid) => pushRef(uid).get()));
 
-      const tokens = [];
-      for (const uid of memberUids) {
-        if (uid === addedBy) continue;
+      const targets = []; // { uid, token }
+      docs.forEach((doc, i) => {
+        if (!doc.exists) return;
+        (doc.data().tokens || []).forEach((token) => targets.push({ uid: recipients[i], token }));
+      });
+      if (targets.length === 0) return null;
 
-        const userDoc = await db.collection('users').doc(uid).get();
-        if (userDoc.exists && userDoc.data().fcmToken) {
-          tokens.push(userDoc.data().fcmToken);
-        }
-      }
-
-      if (tokens.length === 0) return null;
-
-      const payload = {
+      const res = await admin.messaging().sendEachForMulticast({
+        tokens: targets.map((t) => t.token),
         notification: {
-          title: `New split in ${groupName}`,
-          body: `${desc} (${amount}) was added.`,
-          sound: 'default'
+          title: `New split in ${group.name || 'Group'}`,
+          body: `${desc} (${amount}) was added.`
         },
-        data: {
-          groupId: groupId,
-          expenseId: context.params.expenseId
-        }
-      };
+        data: { groupId, expenseId: context.params.expenseId },
+        android: { notification: { sound: 'default' } },
+        apns: { payload: { aps: { sound: 'default' } } }
+      });
 
-      const response = await admin.messaging().sendToDevice(tokens, payload);
-      console.log('Successfully sent expense notification:', response);
+      // Prune tokens that are no longer valid.
+      const dead = {};
+      res.responses.forEach((r, i) => {
+        const code = r.error && r.error.code;
+        if (!r.success && (code === 'messaging/registration-token-not-registered' ||
+                           code === 'messaging/invalid-registration-token')) {
+          (dead[targets[i].uid] = dead[targets[i].uid] || []).push(targets[i].token);
+        }
+      });
+      await Promise.all(Object.entries(dead).map(([uid, tokens]) =>
+        pushRef(uid).update({ tokens: admin.firestore.FieldValue.arrayRemove(...tokens) })));
       return null;
     } catch (error) {
       console.error('Error sending expense notification:', error);

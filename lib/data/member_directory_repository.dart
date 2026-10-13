@@ -9,7 +9,7 @@ import '../models/app_user.dart';
 class MemberDirectoryRepository {
   MemberDirectoryRepository._();
   static final MemberDirectoryRepository instance =
-      MemberDirectoryRepository._();
+  MemberDirectoryRepository._();
 
   CollectionReference<Map<String, dynamic>> get _users =>
       FirebaseFirestore.instance.collection('users');
@@ -59,20 +59,30 @@ class MemberDirectoryRepository {
 
   Future<void> upsertProfile(AppUser user, {String? fcmToken}) async {
     try {
+      // Only write what we actually know — a sign-in with a blank name or
+      // no phone must not wipe the stored values. [fcmToken] is ignored:
+      // push tokens now live in users/{uid}/private/push.
       final data = <String, dynamic>{
-        'name': user.name,
-        'email': user.email,
-        'phoneNumber': user.phoneNumber,
         'platform': defaultTargetPlatform.name,
         'lastLogin': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
-      if (fcmToken != null) {
-        data['fcmToken'] = fcmToken;
-      }
+      if (user.name.trim().isNotEmpty) data['name'] = user.name;
+      if (user.email.trim().isNotEmpty) data['email'] = user.email;
+      if (user.phoneNumber != null) data['phoneNumber'] = user.phoneNumber;
       await _users.doc(user.uid).set(data, SetOptions(merge: true));
     } catch (e, st) {
       debugPrint('MemberDirectoryRepository.upsertProfile failed: $e\n$st');
+    }
+  }
+
+  /// Removes the public profile (account deletion).
+  Future<void> deleteProfile(String uid) async {
+    try {
+      await _users.doc(uid).delete();
+    } catch (e, st) {
+      debugPrint('MemberDirectoryRepository.deleteProfile failed: $e\n$st');
+      rethrow;
     }
   }
 }

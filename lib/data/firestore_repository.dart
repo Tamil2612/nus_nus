@@ -24,50 +24,7 @@ import '../models/group.dart';
 ///    would silently clobber one another. Separate documents don't have
 ///    that problem — each write only touches its own doc.
 ///
-/// Suggested Firestore security rules (Firestore console → Rules):
-///
-/// ```
-/// rules_version = '2';
-/// service cloud.firestore {
-///   match /databases/{database}/documents {
-///     match /users/{uid} {
-///       allow read: if request.auth != null;
-///       allow create, update: if request.auth != null && request.auth.uid == uid;
-///       allow delete: if false;
-///       match /private/{document=**} {
-///         allow read, write: if request.auth != null && request.auth.uid == uid;
-///       }
-///     }
-///
-///     match /groups/{groupId} {
-///       allow read: if request.auth != null &&
-///         request.auth.uid in resource.data.memberUids;
-///       allow create: if request.auth != null &&
-///         request.auth.uid == request.resource.data.ownerId;
-///       // Only the creator can rename the group, edit the member list,
-///       // or delete it outright.
-///       allow update, delete: if request.auth != null &&
-///         request.auth.uid == resource.data.ownerId;
-///
-///       match /expenses/{expenseId} {
-///         allow read: if request.auth != null &&
-///           request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
-///         // Any member can log a new expense, but only as themselves.
-///         allow create: if request.auth != null &&
-///           request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids &&
-///           request.resource.data.addedBy == request.auth.uid;
-///         // Any group member can update (e.g. mark individual shares paid/pending).
-///         allow update: if request.auth != null &&
-///           request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
-///         // Only the person who added the expense or the group's creator can delete it.
-///         allow delete: if request.auth != null && (
-///           request.auth.uid == resource.data.addedBy ||
-///           request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId);
-///       }
-///     }
-///   }
-/// }
-/// ```
+/// Security rules: see `firestore.rules` at the repo root (source of truth).
 class FirestoreRepository {
   FirestoreRepository._();
   static final FirestoreRepository instance = FirestoreRepository._();
@@ -109,8 +66,28 @@ class FirestoreRepository {
     }
   }
 
+  /// Creates the group only if it doesn't exist yet, so an existing
+  /// personal group is never overwritten.
+  Future<void> ensurePersonalGroup(Group group) async {
+    final ref = _groups.doc(group.id);
+    final snap = await ref.get();
+    if (!snap.exists) await ref.set(group.toJson());
+  }
+
+  /// Deletes the group's expenses first (the rules need the group document
+  /// to exist to authorise them), then the group itself.
   Future<void> deleteGroup(String groupId) async {
     try {
+      final col = _expensesCol(groupId);
+      while (true) {
+        final snap = await col.limit(400).get();
+        if (snap.docs.isEmpty) break;
+        final batch = FirebaseFirestore.instance.batch();
+        for (final d in snap.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+      }
       await _groups.doc(groupId).delete();
     } catch (e, st) {
       debugPrint('FirestoreRepository.deleteGroup failed: $e\n$st');
@@ -152,6 +129,19 @@ class FirestoreRepository {
       await _expensesCol(groupId).doc(expense.id).set(expense.toJson());
     } catch (e, st) {
       debugPrint('FirestoreRepository.updateExpense failed: $e\n$st');
+      rethrow;
+    }
+  }
+
+  /// Updates ONLY `settledBy` — what the rules allow any member to change.
+  Future<void> updateSettledBy(
+      String groupId, String expenseId, Set<int> settledBy) async {
+    try {
+      await _expensesCol(groupId).doc(expenseId).update({
+        'settledBy': settledBy.map((e) => e.toString()).toList(),
+      });
+    } catch (e, st) {
+      debugPrint('FirestoreRepository.updateSettledBy failed: $e\n$st');
       rethrow;
     }
   }
