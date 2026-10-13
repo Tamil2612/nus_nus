@@ -768,10 +768,9 @@ class SplitProvider extends ChangeNotifier {
     }
 
     final payerPerson = personById(expense.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid ||
-        expense.addedBy == _uid;
-    // Permission check: only the person who paid (or group owner) can toggle settlements
-    if (!isPayer && group.ownerId != _uid) {
+    final isExpenseCreator = expense.addedBy == _uid;
+    // Only the person who logged this expense can change its paid/pending flags.
+    if (!isExpenseCreator) {
       return;
     }
 
