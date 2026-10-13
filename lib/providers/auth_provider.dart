@@ -11,6 +11,7 @@ class AuthProvider extends ChangeNotifier {
   AppUser? _appUser;
   bool _isBusy = false;
   String? _errorMessage;
+  StreamSubscription<User?>? _userChangesSub;
 
   AuthProvider() {
     _user = _auth.currentUser;
@@ -23,7 +24,7 @@ class AuthProvider extends ChangeNotifier {
     // sign-in/sign-out and would leave displayName looking empty
     // anywhere it's read (e.g. group ownership labels) until the next
     // full sign-in.
-    _auth.userChanges().listen((user) {
+    _userChangesSub = _auth.userChanges().listen((user) {
       _user = user;
       if (user != null) {
         _fetchAppUser(user.uid);
@@ -50,11 +51,22 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchAppUser(String uid) async {
-    final profile = await MemberDirectoryRepository.instance.fetchByUid(uid);
-    if (profile != null) {
+    try {
+      final profile = await MemberDirectoryRepository.instance.fetchByUid(uid);
+      // A slower request from a previous account must not overwrite the
+      // currently signed-in user's profile.
+      if (_user?.uid != uid || profile == null) return;
       _appUser = profile;
       notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to load user profile: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    _userChangesSub?.cancel();
+    super.dispose();
   }
 
   Future<String?> register({
