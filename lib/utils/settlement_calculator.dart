@@ -36,33 +36,21 @@ class SettlementCalculator {
   static List<LedgerEntry> deriveLedgerEntries(List<Expense> expenses) {
     final entries = <LedgerEntry>[];
     for (final e in expenses) {
-      if (e.isSettlement) {
-        if (e.splitMap.isEmpty) continue;
-        final toId = e.splitMap.keys.first;
-        final amount = e.splitMap[toId]!;
+      if (e.isSettlement) continue; // Ignore legacy settlement cards; settlements are tracked via settledBy on split expenses.
+      e.splitMap.forEach((personId, share) {
+        if (personId == e.payerId) return; // payer never owes themselves
+        // A share the payer has marked as paid is no longer owed, so it
+        // drops out of balances — this is what ties the per-expense
+        // PAID/PENDING toggles to the Balances tab.
+        if (e.settledBy.contains(personId)) return;
+        if (share.abs() <= 0.001) return;
         entries.add(LedgerEntry(
           expenseId: e.id,
-          fromId: e.payerId,
-          toId: toId,
-          amount: -amount,
-          isSettlement: true,
+          fromId: personId,
+          toId: e.payerId,
+          amount: share,
         ));
-      } else {
-        e.splitMap.forEach((personId, share) {
-          if (personId == e.payerId) return; // payer never owes themselves
-          // A share the payer has marked as paid is no longer owed, so it
-          // drops out of balances — this is what ties the per-expense
-          // PAID/PENDING toggles to the Balances tab.
-          if (e.settledBy.contains(personId)) return;
-          if (share.abs() <= 0.001) return;
-          entries.add(LedgerEntry(
-            expenseId: e.id,
-            fromId: personId,
-            toId: e.payerId,
-            amount: share,
-          ));
-        });
-      }
+      });
     }
     return entries;
   }

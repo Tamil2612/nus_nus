@@ -95,10 +95,9 @@ service cloud.firestore {
             request.resource.data.settledBy is list
           ) ||
           // Settlement flags are status tracking, not payment processing.
-          // Only the group owner or the person who logged/paid this expense
-          // may change them, and no other field can change in that write.
+          // Any group member may update settledBy status.
           (
-            (isOwner() || request.auth.uid == resource.data.addedBy) &&
+            isGroupMember() &&
             request.resource.data.diff(resource.data)
               .affectedKeys().hasOnly(['settledBy']) &&
             request.resource.data.settledBy is list

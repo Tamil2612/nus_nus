@@ -640,12 +640,12 @@ class SplitProvider extends ChangeNotifier {
       return 'Could not find one of the people in this settlement.';
     }
 
-    // Bulk settlement changes several expenses at once, so only the group
-    // owner can confirm it. Individual shares can still be toggled by the
-    // expense author/payer through togglePersonSettlement().
+    // Permission check: group owner, debtor, or creditor can confirm settlement
     final isOwner = group.ownerId == _uid;
-    if (!isOwner) {
-      return 'Only the group creator can confirm a balance settlement.';
+    final isDebtor = fromPerson.linkedUserId == _uid;
+    final isCreditor = toPerson.linkedUserId == _uid;
+    if (!isOwner && !isDebtor && !isCreditor) {
+      return 'Only the debtor, creditor, or group creator can confirm this settlement.';
     }
 
     // Settlement status is all-or-nothing per expense share. Never let a
@@ -656,28 +656,22 @@ class SplitProvider extends ChangeNotifier {
     for (final balance in SettlementCalculator.computePairBalances(
       SettlementCalculator.deriveLedgerEntries(current),
     )) {
-      if ((balance.debtorId == fromId && balance.creditorId == toId) ||
-          (balance.debtorId == toId && balance.creditorId == fromId)) {
+      if ((balance.personAId == fromId && balance.personBId == toId) ||
+          (balance.personAId == toId && balance.personBId == fromId)) {
         pairBalance = balance;
         break;
       }
     }
 
-    if (pairBalance == null ||
-        pairBalance.debtorId != fromId ||
-        pairBalance.creditorId != toId) {
-      return 'The balance direction has changed. Refresh and try again.';
-    }
-    if ((pairBalance.owedAmount - amount).abs() >= 0.01) {
-      return 'The outstanding balance changed. Refresh and try again.';
+    if (pairBalance == null || pairBalance.debtorId == null || pairBalance.creditorId == null) {
+      return 'No outstanding balance found between these members.';
     }
 
-    // Bulk settlement touches expenses in both directions so the net pair
-    // balance becomes zero. To keep Firestore permissions enforceable without
-    // a payment ledger, only the group owner may confirm this cross-expense
-    // operation; individual expense payers can still toggle their own shares.
-    if (!isOwner) {
-      return 'Only the group creator can confirm a balance settlement.';
+    final actualFromId = pairBalance.debtorId!;
+    final actualToId = pairBalance.creditorId!;
+
+    if ((pairBalance.owedAmount - amount).abs() >= 0.01) {
+      return 'The outstanding balance changed. Refresh and try again.';
     }
 
     final updatedList = <Expense>[];
@@ -685,14 +679,14 @@ class SplitProvider extends ChangeNotifier {
     for (final e in current) {
       Set<int>? newSettled;
       if (!e.isSettlement) {
-        if (e.payerId == toId &&
-            e.splitMap.containsKey(fromId) &&
-            !e.settledBy.contains(fromId)) {
-          newSettled = {...e.settledBy, fromId};
-        } else if (e.payerId == fromId &&
-            e.splitMap.containsKey(toId) &&
-            !e.settledBy.contains(toId)) {
-          newSettled = {...e.settledBy, toId};
+        if (e.payerId == actualToId &&
+            e.splitMap.containsKey(actualFromId) &&
+            !e.settledBy.contains(actualFromId)) {
+          newSettled = {...e.settledBy, actualFromId};
+        } else if (e.payerId == actualFromId &&
+            e.splitMap.containsKey(actualToId) &&
+            !e.settledBy.contains(actualToId)) {
+          newSettled = {...e.settledBy, actualToId};
         }
       }
       if (newSettled != null) {
