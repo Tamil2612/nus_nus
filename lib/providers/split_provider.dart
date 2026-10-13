@@ -592,7 +592,9 @@ class SplitProvider extends ChangeNotifier {
   String? settleUp(int fromId, int toId, double amount, {String? groupId}) {
     final targetId = groupId ?? currentGroup?.id;
     if (targetId == null) return 'Select a group first.';
-    if (amount <= 0) return 'Enter a valid amount.';
+    if (!amount.isFinite || amount <= 0 || fromId == toId) {
+      return 'Enter a valid settlement amount.';
+    }
 
     Group? group;
     for (final g in _groups) {
@@ -630,12 +632,16 @@ class SplitProvider extends ChangeNotifier {
     // stale or arbitrary amount clear a different balance than the one shown
     // to the user. The pairwise balance already nets debts in both directions.
     final current = _expensesByGroup[group.id] ?? const <Expense>[];
-    final pairBalance = SettlementCalculator.computePairBalances(
+    PairBalance? pairBalance;
+    for (final balance in SettlementCalculator.computePairBalances(
       SettlementCalculator.deriveLedgerEntries(current),
-    ).where((balance) =>
-        (balance.debtorId == fromId && balance.creditorId == toId) ||
-        (balance.debtorId == toId && balance.creditorId == fromId))
-      .firstOrNull;
+    )) {
+      if ((balance.debtorId == fromId && balance.creditorId == toId) ||
+          (balance.debtorId == toId && balance.creditorId == fromId)) {
+        pairBalance = balance;
+        break;
+      }
+    }
 
     if (pairBalance == null ||
         pairBalance.debtorId != fromId ||
