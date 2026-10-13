@@ -155,6 +155,8 @@ class BalancesTab extends StatelessWidget {
                       currency: currentGroup?.currency ?? 'AED',
                       subtitle: 'unpaid balance',
                       isOwedByYou: true,
+                      onSettle: () => _confirmSettle(
+                        context, provider, pb.debtorId!, pb.creditorId!, pb.owedAmount),
                     );
                   }),
                   24.verticalSpace,
