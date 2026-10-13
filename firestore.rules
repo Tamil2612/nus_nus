@@ -96,8 +96,7 @@ service cloud.firestore {
             request.resource.data.desc.size() <= 200 &&
             request.resource.data.splitMap is map &&
             request.resource.data.splitMap.keys().size() > 0 &&
-            request.resource.data.settledBy is list &&
-            request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {})
+            request.resource.data.settledBy is list
           ) ||
           // Only the original expense logger can toggle whole-share status.
           // Pairwise partial settlements are written by the trusted callable.
