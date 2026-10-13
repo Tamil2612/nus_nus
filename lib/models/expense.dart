@@ -80,8 +80,9 @@ class Expense {
   bool get isFullySettled => splitMap.keys.every(isPersonPaid);
 
   /// True if anyone other than the payer has paid their share yet.
-  bool get hasPaymentsFromOthers =>
-      splitMap.keys.any((id) => id != payerId && isPersonPaid(id));
+  bool get hasPaymentsFromOthers => splitMap.keys.any((id) =>
+      id != payerId &&
+      (isPersonPaid(id) || (settledAmounts[id] ?? 0) > 0.005));
 
   Expense copyWith({
     String? desc,
