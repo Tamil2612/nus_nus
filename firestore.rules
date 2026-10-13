@@ -85,8 +85,9 @@ service cloud.firestore {
             request.resource.data.payerId == resource.data.payerId &&
             request.resource.data.isSettlement == resource.data.isSettlement &&
             request.resource.data.createdAt == resource.data.createdAt &&
-            request.resource.data.settledBy == resource.data.settledBy &&
-            request.resource.data.settledAmounts == resource.data.settledAmounts &&
+            (request.auth.uid == resource.data.addedBy ||
+              request.resource.data.settledBy == resource.data.settledBy) &&
+            request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) &&
             request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
             request.resource.data.amount <= 100000000 &&
@@ -96,7 +97,7 @@ service cloud.firestore {
             request.resource.data.splitMap is map &&
             request.resource.data.splitMap.keys().size() > 0 &&
             request.resource.data.settledBy is list &&
-            request.resource.data.settledAmounts == resource.data.settledAmounts
+            request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {})
           ) ||
           // Only the original expense logger can toggle whole-share status.
           // Pairwise partial settlements are written by the trusted callable.
