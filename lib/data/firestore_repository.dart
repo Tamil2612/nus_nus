@@ -80,15 +80,22 @@ class FirestoreRepository {
   /// to exist to authorise them), then the group itself.
   Future<void> deleteGroup(String groupId) async {
     try {
-      final col = _expensesCol(groupId);
-      while (true) {
-        final snap = await col.limit(400).get();
-        if (snap.docs.isEmpty) break;
-        final batch = FirebaseFirestore.instance.batch();
-        for (final d in snap.docs) {
-          batch.delete(d.reference);
+      // Firestore does not cascade subcollection deletes. Remove both the
+      // financial records and chat messages before deleting the group itself.
+      final subcollections = [
+        _expensesCol(groupId),
+        _groups.doc(groupId).collection('messages'),
+      ];
+      for (final col in subcollections) {
+        while (true) {
+          final snap = await col.limit(400).get();
+          if (snap.docs.isEmpty) break;
+          final batch = FirebaseFirestore.instance.batch();
+          for (final d in snap.docs) {
+            batch.delete(d.reference);
+          }
+          await batch.commit();
         }
-        await batch.commit();
       }
       await _groups.doc(groupId).delete();
     } catch (e, st) {
