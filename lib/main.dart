@@ -38,7 +38,7 @@ class NusNusApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.dark,
           builder: (context, child) => AppLoadingOverlay.wrap(
-            child: child ?? const SizedBox.shrink(),
+            child ?? const SizedBox.shrink(),
           ),
           home: const AuthGate(),
         ),
