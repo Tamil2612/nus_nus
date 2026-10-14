@@ -669,10 +669,7 @@ class SplitProvider extends ChangeNotifier {
     if (existingIndex == -1) return;
 
     final expense = expenses[existingIndex];
-    final payerPerson = personById(expense.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid ||
-        expense.addedBy == _uid;
-    if (!isPayer && group.ownerId != _uid) return; // not authorized
+    if (expense.addedBy != _uid) return; // only the expense creator may delete
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
@@ -680,7 +677,7 @@ class SplitProvider extends ChangeNotifier {
     _persist(FirestoreRepository.instance.deleteExpense(group.id, id));
   }
 
-  /// RESTRICTED TO THE CREATOR / PAYER of the expense.
+  /// Only the account that created/logged this expense may edit it.
   String? editExpense({
     required String id,
     required String desc,
@@ -696,11 +693,8 @@ class SplitProvider extends ChangeNotifier {
     if (existingIndex == -1) return 'That expense no longer exists.';
 
     final original = expenses[existingIndex];
-    final payerPerson = personById(original.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid ||
-        original.addedBy == _uid;
-    if (!isPayer) {
-      return 'Only the person who paid can edit this split.';
+    if (original.addedBy != _uid) {
+      return 'Only the person who created this split can edit it.';
     }
 
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
