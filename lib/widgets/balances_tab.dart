@@ -58,7 +58,9 @@ class BalancesTab extends StatelessWidget {
       SnackBar(
         content: Text(error ?? 'Settled up — balances updated.'),
         backgroundColor: error != null ? AppColors.rust : AppColors.sage,
-        behavior: SnackBarBehavior.floating,
+        // This tab sits above bottom navigation / a floating action button.
+        // A fixed SnackBar avoids Flutter's floating SnackBar overflow assertion.
+        behavior: SnackBarBehavior.fixed,
       ),
     );
   }
