@@ -76,11 +76,11 @@ service cloud.firestore {
         allow create: if isGroupMember() && validExpense();
 
         // Existing expense identity and authorship cannot be reassigned.
-        // The author or owner can edit expense details, but not payer,
-        // author, creation time, or legacy-settlement identity.
+        // Only the original expense logger can edit expense details. Group
+        // ownership does not grant edit permission on another member's expense.
         allow update: if isGroupMember() && (
           (
-            (isOwner() || request.auth.uid == resource.data.addedBy) &&
+            request.auth.uid == resource.data.addedBy &&
             request.resource.data.addedBy == resource.data.addedBy &&
             request.resource.data.payerId == resource.data.payerId &&
             request.resource.data.isSettlement == resource.data.isSettlement &&
@@ -111,9 +111,9 @@ service cloud.firestore {
           )
         );
 
-        // The expense author or group owner may delete an expense.
+        // Only the original expense logger may delete an expense.
         allow delete: if isGroupMember() &&
-          (isOwner() || request.auth.uid == resource.data.addedBy);
+          request.auth.uid == resource.data.addedBy;
       }
     }
   }
