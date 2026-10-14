@@ -239,7 +239,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             style: const TextStyle(
                 color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: const Text(
-          'This permanently deletes the group along with all its members '
+          'This permanently deletes the group, chat, members, '
           'and expense history. This can\'t be undone.',
           style: TextStyle(color: AppColors.slate),
         ),
