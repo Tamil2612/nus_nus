@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/split_provider.dart';
 import 'screens/auth_gate.dart';
+import 'widgets/app_loading_overlay.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -36,6 +37,9 @@ class NusNusApp extends StatelessWidget {
           title: 'Nus-Nus',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.dark,
+          builder: (context, child) => AppLoadingOverlay.wrap(
+            child: child ?? const SizedBox.shrink(),
+          ),
           home: const AuthGate(),
         ),
       ),
