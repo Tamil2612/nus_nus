@@ -221,7 +221,7 @@ class NusDrawer extends StatelessWidget {
                       if (error != null && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text(error!),
+                            content: Text(error),
                             backgroundColor: AppColors.rust,
                             behavior: SnackBarBehavior.fixed,
                           ),
