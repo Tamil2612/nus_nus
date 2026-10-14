@@ -9,6 +9,7 @@ import '../widgets/balances_tab.dart';
 import '../widgets/branded_loader.dart';
 import '../utils/currency_formatter.dart';
 import '../widgets/ledger_tab.dart';
+import '../widgets/group_chat_tab.dart';
 import '../widgets/expense_form_sheet.dart';
 import '../widgets/nus_drawer.dart';
 
@@ -29,7 +30,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       setState(() {});
     });
@@ -371,8 +372,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                           labelStyle: TextStyle(
                               fontSize: 12.5.sp, fontWeight: FontWeight.bold),
                           tabs: const [
-                            Tab(text: 'Activity'),
-                            Tab(text: 'Balances'),
+                            Tab(icon: Icon(Icons.chat_bubble_outline, size: 16), text: 'Chat'),
+                            Tab(icon: Icon(Icons.receipt_long_outlined, size: 16), text: 'Expenses'),
+                            Tab(icon: Icon(Icons.account_balance_wallet_outlined, size: 16), text: 'Balances'),
                           ],
                         ),
                       ),
@@ -381,6 +383,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                       child: TabBarView(
                         controller: _tabController,
                         children: [
+                          const GroupChatTab(),
                           LedgerTab(),
                           BalancesTab(),
                         ],
