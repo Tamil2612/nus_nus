@@ -9,8 +9,11 @@ class Expense {
   /// Maps Person ID to the amount they owe for this specific expense.
   final Map<int, double> splitMap;
   final bool isSettlement;
-  /// Set of person IDs who have settled their share for this expense.
+  /// Set of person IDs whose entire share has been marked paid (legacy-compatible).
   final Set<int> settledBy;
+  /// Amount reconciled against each person's share, including netted debt
+  /// offsets and external partial settlements. Keys are participant IDs.
+  final Map<int, double> settledAmounts;
   /// Uid of whoever logged this expense — any member of the group can add
   /// one, not just the creator, so this is what "Added by X" is built
   /// from. Null for expenses written before this field existed.
@@ -25,9 +28,11 @@ class Expense {
     required this.splitMap,
     this.isSettlement = false,
     Set<int>? settledBy,
+    Map<int, double>? settledAmounts,
     this.addedBy,
     this.createdAt,
-  }) : settledBy = settledBy ?? {};
+  }) : settledBy = settledBy ?? {},
+       settledAmounts = settledAmounts ?? const {};
 
   List<int> get splitWith => splitMap.keys.toList();
 
@@ -39,8 +44,30 @@ class Expense {
   /// Whether [personId]'s share of this expense counts as paid. The payer
   /// is always paid (they fronted the money), and legacy settlement records
   /// are paid by definition.
-  bool isPersonPaid(int personId) =>
-      isSettlement || personId == payerId || settledBy.contains(personId);
+  bool isPersonPaid(int personId) {
+    if (isSettlement || personId == payerId || settledBy.contains(personId)) {
+      return true;
+    }
+    final share = splitMap[personId];
+    if (share == null) return false;
+    return (share - (settledAmounts[personId] ?? 0)).abs() <= 0.005;
+  }
+
+  /// Amount of [personId]'s share that remains outstanding.
+  double remainingShare(int personId) {
+    if (isSettlement || personId == payerId || settledBy.contains(personId)) {
+      return 0;
+    }
+    final share = splitMap[personId] ?? 0;
+    return (share - (settledAmounts[personId] ?? 0)).clamp(0.0, share).toDouble();
+  }
+
+  /// Whether some, but not all, of this person's share has been settled.
+  bool isPersonPartiallyPaid(int personId) {
+    if (isPersonPaid(personId)) return false;
+    final paid = settledAmounts[personId] ?? 0;
+    return paid > 0.005 && remainingShare(personId) > 0.005;
+  }
 
   /// Number of split participants whose share is paid (payer included when
   /// they're part of the split).
@@ -53,8 +80,9 @@ class Expense {
   bool get isFullySettled => splitMap.keys.every(isPersonPaid);
 
   /// True if anyone other than the payer has paid their share yet.
-  bool get hasPaymentsFromOthers =>
-      splitMap.keys.any((id) => id != payerId && isPersonPaid(id));
+  bool get hasPaymentsFromOthers => splitMap.keys.any((id) =>
+      id != payerId &&
+      (isPersonPaid(id) || (settledAmounts[id] ?? 0) > 0.005));
 
   Expense copyWith({
     String? desc,
@@ -63,6 +91,7 @@ class Expense {
     Map<int, double>? splitMap,
     bool? isSettlement,
     Set<int>? settledBy,
+    Map<int, double>? settledAmounts,
     String? addedBy,
     DateTime? createdAt,
   }) {
@@ -74,6 +103,7 @@ class Expense {
       splitMap: splitMap ?? this.splitMap,
       isSettlement: isSettlement ?? this.isSettlement,
       settledBy: settledBy ?? this.settledBy,
+      settledAmounts: settledAmounts ?? this.settledAmounts,
       addedBy: addedBy ?? this.addedBy,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -89,6 +119,7 @@ class Expense {
     'isSettlement': isSettlement,
     // Stored as a list of id strings (Firestore can't encode MapEntry).
     'settledBy': settledBy.map((e) => e.toString()).toList(),
+    'settledAmounts': settledAmounts.map((k, v) => MapEntry(k.toString(), v)),
     'addedBy': addedBy,
     'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
   };
@@ -106,9 +137,20 @@ class Expense {
     ),
     isSettlement: json['isSettlement'] as bool? ?? false,
     settledBy: _parseSettledBy(json['settledBy']),
+    settledAmounts: _parseSettledAmounts(json['settledAmounts']),
     addedBy: json['addedBy'] as String?,
     createdAt: json['createdAt'] != null ? (json['createdAt'] as Timestamp).toDate() : null,
   );
+
+  static Map<int, double> _parseSettledAmounts(dynamic raw) {
+    if (raw is Map) {
+      return raw.map((key, value) => MapEntry(
+        int.parse(key.toString()),
+        (value as num).toDouble(),
+      ));
+    }
+    return {};
+  }
 
   static Set<int> _parseSettledBy(dynamic raw) {
     if (raw is List) {

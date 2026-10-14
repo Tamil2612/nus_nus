@@ -39,16 +39,17 @@ class SettlementCalculator {
       if (e.isSettlement) continue; // Ignore legacy settlement cards; settlements are tracked via settledBy on split expenses.
       e.splitMap.forEach((personId, share) {
         if (personId == e.payerId) return; // payer never owes themselves
-        // A share the payer has marked as paid is no longer owed, so it
-        // drops out of balances — this is what ties the per-expense
-        // PAID/PENDING toggles to the Balances tab.
+        // Whole-share flags remain supported for older records. Pairwise
+        // settlements can also reduce a share by an exact partial amount.
         if (e.settledBy.contains(personId)) return;
-        if (share.abs() <= 0.001) return;
+        final outstanding = (share - (e.settledAmounts[personId] ?? 0))
+            .clamp(0.0, share).toDouble();
+        if (outstanding <= 0.005) return;
         entries.add(LedgerEntry(
           expenseId: e.id,
           fromId: personId,
           toId: e.payerId,
-          amount: share,
+          amount: outstanding,
         ));
       });
     }

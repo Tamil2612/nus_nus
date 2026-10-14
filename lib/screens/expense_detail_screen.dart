@@ -105,11 +105,11 @@ class ExpenseDetailScreen extends StatelessWidget {
         .cast<Person>();
 
     final totalParticipants = liveExpense.participantCount;
-    final isAdder = liveExpense.addedBy == provider.uid || provider.isCurrentGroupOwner;
+    final isAdder = liveExpense.addedBy == provider.uid;
     final isFullySettled = liveExpense.isFullySettled;
     final settledCount = liveExpense.settledCount;
     // Legacy settlement records can't be toggled per person.
-    final canToggle = isAdder && !liveExpense.isSettlement;
+    final canToggle = liveExpense.addedBy == provider.uid && !liveExpense.isSettlement;
 
     return Scaffold(
       body: Container(
@@ -343,6 +343,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
                       final isSettled = liveExpense.isPersonPaid(person.id);
+                      final isPartial = liveExpense.isPersonPartiallyPaid(person.id);
 
                       return GestureDetector(
                         onTap: (canToggle && !isPayer)
@@ -401,7 +402,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                                             borderRadius: BorderRadius.circular(6.r),
                                           ),
                                           child: Text(
-                                            isSettled ? 'PAID' : 'PENDING',
+                                            isSettled ? 'PAID' : (isPartial ? 'PARTIAL' : 'PENDING'),
                                             style: TextStyle(
                                               fontSize: 9.sp,
                                               fontWeight: FontWeight.w900,

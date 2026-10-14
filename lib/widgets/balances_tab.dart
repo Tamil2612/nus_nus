@@ -7,6 +7,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import 'common_atoms.dart';
+import 'app_loading_overlay.dart';
 
 class BalancesTab extends StatelessWidget {
   const BalancesTab({super.key});
@@ -29,9 +30,9 @@ class BalancesTab extends StatelessWidget {
         title: const Text('Record settlement?',
             style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
-          'This records that ${from?.name ?? '?'} paid ${to?.name ?? '?'} '
-          '${fmtCurrency(amount, provider.currentGroup?.currency ?? 'AED')} outside the app. It just updates the ledger — '
-          'no money actually moves.',
+          'This records a net settlement between ${from?.name ?? '?'} and ${to?.name ?? '?'} '
+          'for ${fmtCurrency(amount, provider.currentGroup?.currency ?? 'AED')}. Opposing debts are offset first; '
+          'only the remaining net amount is treated as paid outside the app. No money moves inside Nus·Nus.',
           style: const TextStyle(color: AppColors.slate),
         ),
         actions: [
@@ -52,13 +53,24 @@ class BalancesTab extends StatelessWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    final error = provider.settleUp(fromId, toId, amount);
+    AppLoadingOverlay.show('Recording settlement…');
+    String? error;
+    try {
+      error = await provider.settleUp(fromId, toId, amount);
+    } catch (e) {
+      debugPrint('BalancesTab: settlement failed unexpectedly: $e');
+      error = 'Could not record settlement. Please try again.';
+    } finally {
+      AppLoadingOverlay.hide();
+    }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(error ?? 'Settled up — balances updated.'),
         backgroundColor: error != null ? AppColors.rust : AppColors.sage,
-        behavior: SnackBarBehavior.floating,
+        // This tab sits above bottom navigation / a floating action button.
+        // A fixed SnackBar avoids Flutter's floating SnackBar overflow assertion.
+        behavior: SnackBarBehavior.fixed,
       ),
     );
   }
@@ -155,6 +167,8 @@ class BalancesTab extends StatelessWidget {
                       currency: currentGroup?.currency ?? 'AED',
                       subtitle: 'unpaid balance',
                       isOwedByYou: true,
+                      onSettle: () => _confirmSettle(
+                        context, provider, pb.debtorId!, pb.creditorId!, pb.owedAmount),
                     );
                   }),
                   24.verticalSpace,

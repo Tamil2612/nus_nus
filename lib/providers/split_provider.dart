@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../data/firestore_repository.dart';
 import '../data/member_directory_repository.dart';
 import '../models/expense.dart';
@@ -606,108 +607,56 @@ class SplitProvider extends ChangeNotifier {
   /// instead of zeroing it. [amount] is only validated — the amount to pay
   /// is whatever the Balances tab showed for the pair.
   ///
-  /// This is the single place that decides who's allowed to confirm a
-  /// settlement — both the per-group Balances tab and the cross-group
-  /// Overview's "settle all dues" go through it: only the group's creator
-  /// or the person actually being paid can confirm.
-  String? settleUp(int fromId, int toId, double amount, {String? groupId}) {
+  /// This is the single place that validates pairwise settlement requests.
+  /// Either linked participant in the debtor-creditor pair may confirm; the
+  /// callable revalidates the balance and atomically records the allocation.
+  Future<String?> settleUp(int fromId, int toId, double amount, {String? groupId}) async {
     final targetId = groupId ?? currentGroup?.id;
     if (targetId == null) return 'Select a group first.';
     if (!amount.isFinite || amount <= 0 || fromId == toId) {
       return 'Enter a valid settlement amount.';
     }
-
     Group? group;
-    for (final g in _groups) {
-      if (g.id == targetId) {
-        group = g;
-        break;
-      }
-    }
+    for (final g in _groups) { if (g.id == targetId) { group = g; break; } }
     if (group == null) return 'Could not find that group.';
-
-    if (!group.memberUids.contains(_uid)) {
-      return "You're not a member of this group.";
-    }
-
+    if (!group.memberUids.contains(_uid)) return "You're not a member of this group.";
     Person? fromPerson;
     Person? toPerson;
-    for (final p in group.members) {
-      if (p.id == fromId) fromPerson = p;
-      if (p.id == toId) toPerson = p;
+    for (final p in group.members) { if (p.id == fromId) fromPerson = p; if (p.id == toId) toPerson = p; }
+    if (fromPerson == null || toPerson == null) return 'Could not find one of the people in this settlement.';
+    // Either linked account in the debtor-creditor pair may record settlement.
+    if (fromPerson.linkedUserId != _uid && toPerson.linkedUserId != _uid) {
+      return 'Only someone in this debtor-creditor pair can confirm settlement.';
     }
-    if (fromPerson == null || toPerson == null) {
-      return 'Could not find one of the people in this settlement.';
+    final pair = SettlementCalculator.computePairBalances(
+      SettlementCalculator.deriveLedgerEntries(_expensesByGroup[group.id] ?? const <Expense>[]),
+    ).where((balance) =>
+      (balance.personAId == fromId && balance.personBId == toId) ||
+      (balance.personAId == toId && balance.personBId == fromId),
+    ).toList();
+    if (pair.isEmpty || pair.first.debtorId != fromId || pair.first.creditorId != toId) {
+      return 'The debt direction changed. Refresh and try again.';
     }
-
-    // Permission check: group owner, debtor, or creditor can confirm settlement
-    final isOwner = group.ownerId == _uid;
-    final isDebtor = fromPerson.linkedUserId == _uid;
-    final isCreditor = toPerson.linkedUserId == _uid;
-    if (!isOwner && !isDebtor && !isCreditor) {
-      return 'Only the debtor, creditor, or group creator can confirm this settlement.';
-    }
-
-    // Settlement status is all-or-nothing per expense share. Never let a
-    // stale or arbitrary amount clear a different balance than the one shown
-    // to the user. The pairwise balance already nets debts in both directions.
-    final current = _expensesByGroup[group.id] ?? const <Expense>[];
-    PairBalance? pairBalance;
-    for (final balance in SettlementCalculator.computePairBalances(
-      SettlementCalculator.deriveLedgerEntries(current),
-    )) {
-      if ((balance.personAId == fromId && balance.personBId == toId) ||
-          (balance.personAId == toId && balance.personBId == fromId)) {
-        pairBalance = balance;
-        break;
+    if (amount - pair.first.owedAmount > 0.005) return 'Settlement amount exceeds the current outstanding balance.';
+    // Server recomputes the net and atomically allocates this amount to existing shares.
+    try {
+      await FirestoreRepository.instance.recordPairSettlement(
+        groupId: group.id, fromId: fromId, toId: toId, amount: amount,
+      );
+      return null;
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('SplitProvider: settlement callable failed (${error.code}): ${error.message}');
+      if (error.code == 'unauthenticated') {
+        return 'Your sign-in has expired. Please sign out and sign in again.';
       }
-    }
-
-    if (pairBalance == null || pairBalance.debtorId == null || pairBalance.creditorId == null) {
-      return 'No outstanding balance found between these members.';
-    }
-
-    final actualFromId = pairBalance.debtorId!;
-    final actualToId = pairBalance.creditorId!;
-
-    if ((pairBalance.owedAmount - amount).abs() >= 0.01) {
-      return 'The outstanding balance changed. Refresh and try again.';
-    }
-
-    final updatedList = <Expense>[];
-    final changed = <Expense>[];
-    for (final e in current) {
-      Set<int>? newSettled;
-      if (!e.isSettlement) {
-        if (e.payerId == actualToId &&
-            e.splitMap.containsKey(actualFromId) &&
-            !e.settledBy.contains(actualFromId)) {
-          newSettled = {...e.settledBy, actualFromId};
-        } else if (e.payerId == actualFromId &&
-            e.splitMap.containsKey(actualToId) &&
-            !e.settledBy.contains(actualToId)) {
-          newSettled = {...e.settledBy, actualToId};
-        }
+      if (error.code == 'permission-denied' || error.code == 'failed-precondition') {
+        return error.message ?? 'The balance changed. Refresh and try again.';
       }
-      if (newSettled != null) {
-        final updated = e.copyWith(settledBy: newSettled);
-        updatedList.add(updated);
-        changed.add(updated);
-      } else {
-        updatedList.add(e);
-      }
+      return error.message ?? 'Could not record settlement. Please try again.';
+    } catch (error) {
+      debugPrint('SplitProvider: settlement failed: $error');
+      return 'Could not record settlement. Refresh and try again.';
     }
-
-    if (changed.isEmpty) return 'Nothing left to settle between them.';
-
-    _expensesByGroup[group.id] = updatedList;
-    _rebuildGroups();
-    notifyListeners();
-    for (final e in changed) {
-      _persist(FirestoreRepository.instance
-          .updateSettledBy(group.id, e.id, e.settledBy));
-    }
-    return null;
   }
 
   /// deleting an expense someone else logged (or your own) is a destructive
@@ -720,10 +669,7 @@ class SplitProvider extends ChangeNotifier {
     if (existingIndex == -1) return;
 
     final expense = expenses[existingIndex];
-    final payerPerson = personById(expense.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid ||
-        expense.addedBy == _uid;
-    if (!isPayer && group.ownerId != _uid) return; // not authorized
+    if (expense.addedBy != _uid) return; // only the expense creator may delete
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
@@ -731,7 +677,7 @@ class SplitProvider extends ChangeNotifier {
     _persist(FirestoreRepository.instance.deleteExpense(group.id, id));
   }
 
-  /// RESTRICTED TO THE CREATOR / PAYER of the expense.
+  /// Only the account that created/logged this expense may edit it.
   String? editExpense({
     required String id,
     required String desc,
@@ -747,11 +693,8 @@ class SplitProvider extends ChangeNotifier {
     if (existingIndex == -1) return 'That expense no longer exists.';
 
     final original = expenses[existingIndex];
-    final payerPerson = personById(original.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid ||
-        original.addedBy == _uid;
-    if (!isPayer) {
-      return 'Only the person who paid can edit this split.';
+    if (original.addedBy != _uid) {
+      return 'Only the person who created this split can edit it.';
     }
 
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
@@ -787,6 +730,17 @@ class SplitProvider extends ChangeNotifier {
       }
     }
 
+    // A partial amount remains valid only if that person's share did not
+    // change. Drop stale partial allocations when an edited split changes.
+    final newSettledAmounts = <int, double>{};
+    for (final entry in original.settledAmounts.entries) {
+      if (original.splitMap[entry.key] != null &&
+          newSplitMap[entry.key] != null &&
+          (original.splitMap[entry.key]! - newSplitMap[entry.key]!).abs() < 0.005) {
+        newSettledAmounts[entry.key] = entry.value;
+      }
+    }
+
     final updatedExpense = original.copyWith(
       desc: desc
           .trim()
@@ -795,6 +749,7 @@ class SplitProvider extends ChangeNotifier {
       payerId: payerId,
       splitMap: newSplitMap,
       settledBy: newSettledBy,
+      settledAmounts: newSettledAmounts,
     );
 
     final updatedExpenses = [...expenses];
@@ -832,11 +787,9 @@ class SplitProvider extends ChangeNotifier {
       return; // Cannot toggle/revert the person who paid
     }
 
-    final payerPerson = personById(expense.payerId);
-    final isPayer = payerPerson?.linkedUserId == _uid ||
-        expense.addedBy == _uid;
-    // Permission check: only the person who paid (or group owner) can toggle settlements
-    if (!isPayer && group.ownerId != _uid) {
+    final isExpenseCreator = expense.addedBy == _uid;
+    // Only the person who logged this expense can change its paid/pending flags.
+    if (!isExpenseCreator) {
       return;
     }
 
@@ -1035,7 +988,7 @@ class SplitProvider extends ChangeNotifier {
       final fromId = contrib.amount > 0 ? contrib.counterpartId : contrib.myId;
       final toId = contrib.amount > 0 ? contrib.myId : contrib.counterpartId;
 
-      final error = settleUp(
+      final error = await settleUp(
         fromId,
         toId,
         contrib.amount.abs(),

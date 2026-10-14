@@ -175,6 +175,84 @@ void main() {
       expect(pairBalances, isEmpty);
     });
 
+    test('partial settlement reduces only the remaining share amount', () {
+      final expenses = [
+        Expense(
+          id: 'e-partial',
+          desc: 'Dinner',
+          amount: 100,
+          payerId: 1,
+          splitMap: {1: 40, 2: 60},
+          settledAmounts: {2: 20},
+        ),
+      ];
+
+      final entries = SettlementCalculator.deriveLedgerEntries(expenses);
+      expect(entries.length, 1);
+      expect(entries.single.fromId, 2);
+      expect(entries.single.toId, 1);
+      expect(entries.single.amount, closeTo(40, 0.01));
+      expect(expenses.single.isPersonPartiallyPaid(2), isTrue);
+      expect(expenses.single.isPersonPaid(2), isFalse);
+    });
+
+    test('net settlement reconciles opposing debts plus the net amount paid', () {
+      final expenses = [
+        Expense(
+          id: 'e-forward',
+          desc: 'Forward debt',
+          amount: 100,
+          payerId: 1,
+          splitMap: {2: 100},
+          settledAmounts: {2: 100},
+        ),
+        Expense(
+          id: 'e-reverse',
+          desc: 'Reverse debt',
+          amount: 40,
+          payerId: 2,
+          splitMap: {1: 40},
+          settledAmounts: {1: 40},
+        ),
+      ];
+
+      final balances = SettlementCalculator.computePairBalances(
+        SettlementCalculator.deriveLedgerEntries(expenses),
+      );
+      expect(balances, isEmpty);
+      expect(expenses.first.isPersonPaid(2), isTrue);
+      expect(expenses.last.isPersonPaid(1), isTrue);
+    });
+
+    test('partial net settlement leaves exactly the unpaid net balance', () {
+      final expenses = [
+        Expense(
+          id: 'e-forward',
+          desc: 'Forward debt',
+          amount: 100,
+          payerId: 1,
+          splitMap: {2: 100},
+          settledAmounts: {2: 60},
+        ),
+        Expense(
+          id: 'e-reverse',
+          desc: 'Reverse debt',
+          amount: 40,
+          payerId: 2,
+          splitMap: {1: 40},
+          settledAmounts: {1: 40},
+        ),
+      ];
+
+      final balances = SettlementCalculator.computePairBalances(
+        SettlementCalculator.deriveLedgerEntries(expenses),
+      );
+      expect(balances.length, 1);
+      expect(balances.single.debtorId, 2);
+      expect(balances.single.creditorId, 1);
+      expect(balances.single.owedAmount, closeTo(40, 0.01));
+    });
+
     test('settled share is excluded from the outstanding balance', () {
       final expenses = [
         Expense(
