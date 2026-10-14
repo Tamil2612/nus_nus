@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../models/group.dart';
 import '../providers/auth_provider.dart';
+import 'app_loading_overlay.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../screens/group_detail_screen.dart';
@@ -207,7 +208,25 @@ class NusDrawer extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: () async {
                       Navigator.pop(context);
-                      await context.read<AuthProvider>().signOut();
+                      AppLoadingOverlay.show('Signing out…');
+                      String? error;
+                      try {
+                        await context.read<AuthProvider>().signOut();
+                      } catch (e) {
+                        debugPrint('Sign out failed: $e');
+                        error = 'Could not sign out. Please try again.';
+                      } finally {
+                        AppLoadingOverlay.hide();
+                      }
+                      if (error != null && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(error!),
+                            backgroundColor: AppColors.rust,
+                            behavior: SnackBarBehavior.fixed,
+                          ),
+                        );
+                      }
                     },
                     icon:
                         const Icon(Icons.logout_rounded, size: 18),
