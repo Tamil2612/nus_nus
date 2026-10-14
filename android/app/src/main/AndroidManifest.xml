@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Android 13+: needed to show notifications (new-split pushes). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="Nus.Nus"
         android:name="${applicationName}"
@@ -30,6 +32,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Channel used for pushes that arrive while the app is closed. Created
+             in MainActivity.kt; must match the channelId sent by the
+             onExpenseCreated Cloud Function. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="expenses" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

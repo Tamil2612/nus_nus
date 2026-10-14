@@ -1,6 +1,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { sendExpenseNotifications } = require('./notifications');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -194,62 +195,27 @@ ${userQuery}
   }
 });
 
-// Send push notification when a new expense/split is created.
-// Tokens live in users/{uid}/private/push as { tokens: [..] }.
+// Push notification to the people included in a newly created expense.
+// Targeting, message text and token cleanup live in ./notifications.js (unit
+// tested). Tokens live in users/{uid}/private/push as { tokens: [..] }.
 exports.onExpenseCreated = functions.firestore
   .document('groups/{groupId}/expenses/{expenseId}')
   .onCreate(async (snapshot, context) => {
-    const groupId = context.params.groupId;
-    const expense = snapshot.data();
-    if (expense.isSettlement) return null;
-
-    const desc = expense.desc || 'New split';
-    const amount = expense.amount || 0;
-
     try {
-      const groupDoc = await db.collection('groups').doc(groupId).get();
-      if (!groupDoc.exists) return null;
-      const group = groupDoc.data();
-      if (group.isPersonal) return null;
-
-      const recipients = (group.memberUids || []).filter((uid) => uid !== expense.addedBy);
-      const pushRef = (uid) => db.collection('users').doc(uid).collection('private').doc('push');
-      const docs = await Promise.all(recipients.map((uid) => pushRef(uid).get()));
-
-      const targets = []; // { uid, token }
-      docs.forEach((doc, i) => {
-        if (!doc.exists) return;
-        (doc.data().tokens || []).forEach((token) => targets.push({ uid: recipients[i], token }));
+      const stats = await sendExpenseNotifications({
+        db,
+        messaging: admin.messaging(),
+        fieldValue: admin.firestore.FieldValue,
+        groupId: context.params.groupId,
+        expenseId: context.params.expenseId,
+        expense: snapshot.data(),
       });
-      if (targets.length === 0) return null;
-
-      const res = await admin.messaging().sendEachForMulticast({
-        tokens: targets.map((t) => t.token),
-        notification: {
-          title: `New split in ${group.name || 'Group'}`,
-          body: `${desc} (${amount}) was added.`
-        },
-        data: { groupId, expenseId: context.params.expenseId },
-        android: { notification: { sound: 'default' } },
-        apns: { payload: { aps: { sound: 'default' } } }
-      });
-
-      // Prune tokens that are no longer valid.
-      const dead = {};
-      res.responses.forEach((r, i) => {
-        const code = r.error && r.error.code;
-        if (!r.success && (code === 'messaging/registration-token-not-registered' ||
-                           code === 'messaging/invalid-registration-token')) {
-          (dead[targets[i].uid] = dead[targets[i].uid] || []).push(targets[i].token);
-        }
-      });
-      await Promise.all(Object.entries(dead).map(([uid, tokens]) =>
-        pushRef(uid).update({ tokens: admin.firestore.FieldValue.arrayRemove(...tokens) })));
-      return null;
+      console.log('onExpenseCreated', context.params.expenseId, JSON.stringify(stats));
     } catch (error) {
+      // Never fail/retry the trigger over a notification problem.
       console.error('Error sending expense notification:', error);
-      return null;
     }
+    return null;
   });
 
 // Health check function

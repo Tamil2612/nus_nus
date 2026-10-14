@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/split_provider.dart';
 import 'screens/auth_gate.dart';
+import 'services/push_navigation.dart';
 import 'widgets/app_loading_overlay.dart';
 import 'theme/app_theme.dart';
 
@@ -15,6 +16,10 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Lets notification taps open the right expense, and shows an in-app banner
+  // for pushes that arrive while the app is open (Android).
+  registerPushNavigation();
 
   runApp(const NusNusApp());
 }
@@ -35,6 +40,8 @@ class NusNusApp extends StatelessWidget {
         splitScreenMode: true,
         child: MaterialApp(
           title: 'Nus-Nus',
+          navigatorKey: appNavigatorKey,
+          scaffoldMessengerKey: appMessengerKey,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.dark,
           builder: (context, child) => AppLoadingOverlay.wrap(
