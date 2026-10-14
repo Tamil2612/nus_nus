@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../data/firestore_repository.dart';
 import '../data/member_directory_repository.dart';
 import '../models/expense.dart';
@@ -643,6 +644,15 @@ class SplitProvider extends ChangeNotifier {
         groupId: group.id, fromId: fromId, toId: toId, amount: amount,
       );
       return null;
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('SplitProvider: settlement callable failed (${error.code}): ${error.message}');
+      if (error.code == 'unauthenticated') {
+        return 'Your sign-in has expired. Please sign out and sign in again.';
+      }
+      if (error.code == 'permission-denied' || error.code == 'failed-precondition') {
+        return error.message ?? 'The balance changed. Refresh and try again.';
+      }
+      return error.message ?? 'Could not record settlement. Please try again.';
     } catch (error) {
       debugPrint('SplitProvider: settlement failed: $error');
       return 'Could not record settlement. Refresh and try again.';
