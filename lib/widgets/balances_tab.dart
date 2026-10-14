@@ -7,6 +7,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import 'common_atoms.dart';
+import 'app_loading_overlay.dart';
 
 class BalancesTab extends StatelessWidget {
   const BalancesTab({super.key});
@@ -52,7 +53,16 @@ class BalancesTab extends StatelessWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    final error = await provider.settleUp(fromId, toId, amount);
+    AppLoadingOverlay.show('Recording settlement…');
+    String? error;
+    try {
+      error = await provider.settleUp(fromId, toId, amount);
+    } catch (e) {
+      debugPrint('BalancesTab: settlement failed unexpectedly: $e');
+      error = 'Could not record settlement. Please try again.';
+    } finally {
+      AppLoadingOverlay.hide();
+    }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
