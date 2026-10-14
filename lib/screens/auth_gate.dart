@@ -19,6 +19,9 @@ class AuthGate extends StatelessWidget {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!context.mounted) return;
       context.read<SplitProvider>().setUserId(uid);
+      if (uid == null) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     });
 
     Widget child;
