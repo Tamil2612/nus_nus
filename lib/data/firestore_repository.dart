@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/expense.dart';
 import '../models/group.dart';
@@ -156,7 +157,25 @@ class FirestoreRepository {
     required int toId,
     required double amount,
   }) async {
-    final callable = FirebaseFunctions.instance.httpsCallable('recordPairSettlement');
+    // Refresh the cached ID token before the callable SDK attaches it.
+    // This does not bypass authentication; it ensures the signed-in session
+    // has a fresh token for the trusted server-side settlement endpoint.
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Your session has expired. Sign in again to record a settlement.',
+      );
+    }
+    final token = await user.getIdToken(true);
+    if (token == null || token.isEmpty) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Could not refresh your sign-in. Please sign in again.',
+      );
+    }
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('recordPairSettlement');
     await callable.call({
       'groupId': groupId,
       'fromId': fromId,
