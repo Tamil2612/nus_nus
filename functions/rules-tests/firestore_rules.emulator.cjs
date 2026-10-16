@@ -110,6 +110,9 @@ test('message authors may edit text but cannot rewrite identity or timestamp', a
     });
   });
   await assertSucceeds(updateDoc(messageRef(member), { text: 'After', isEdited: true }));
+  // Editing a message a second time must fail, even for its original author.
+  await assertFails(updateDoc(messageRef(member), { text: 'Edited again', isEdited: true }));
+  await assertFails(updateDoc(messageRef(member), { text: 'After', isEdited: true }));
   await assertFails(updateDoc(messageRef(member), { senderName: 'Admin', isEdited: true }));
   await assertFails(updateDoc(messageRef(member), {
     text: 'Reordered',
