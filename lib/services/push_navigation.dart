@@ -99,21 +99,22 @@ Future<void> _openFromPush(Map<String, String> data) async {
   final generation = ++_openGeneration;
   for (var attempt = 0; attempt < 50; attempt++) {
     if (generation != _openGeneration) return; // a newer tap took over
-    final context = appNavigatorKey.currentContext;
-    if (context != null) {
+    final navigator = appNavigatorKey.currentState;
+    final context = navigator?.context;
+    if (navigator != null && context != null && navigator.mounted && context.mounted) {
       final provider = Provider.of<SplitProvider>(context, listen: false);
       final groupExists = provider.groups.any((group) => group.id == groupId);
       if (groupExists) {
         provider.selectGroup(groupId);
         if (notificationType == 'group_message') {
-          appNavigatorKey.currentState?.push(
+          navigator.push(
             MaterialPageRoute<void>(builder: (_) => const GroupDetailScreen()),
           );
           return;
         }
         final expense = _findExpense(provider, groupId, expenseId ?? '');
         if (expense != null) {
-          appNavigatorKey.currentState?.push(
+          navigator.push(
             MaterialPageRoute<void>(builder: (_) => ExpenseDetailScreen(expense: expense)),
           );
           return;
