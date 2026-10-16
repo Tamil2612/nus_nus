@@ -22,7 +22,7 @@ const {
   deleteObject,
 } = require('firebase/storage');
 
-const projectId = 'demo-nus-nus-rules';
+const projectId = 'demo-nus-nus';
 let env;
 let storagePath;
 
