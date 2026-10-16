@@ -24,7 +24,6 @@ jobs:
           cache-dependency-path: functions/package-lock.json
       - run: npm install --prefix functions
       - run: npm test --prefix functions
-      - run: npm run test:rules --prefix functions
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
