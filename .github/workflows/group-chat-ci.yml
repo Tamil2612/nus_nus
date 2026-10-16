@@ -1,0 +1,55 @@
+name: Group Chat CI
+
+on:
+  push:
+    branches:
+      - feature/group-chat-expenses
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Cloud Functions dependencies
+        run: npm install --prefix functions
+
+      - name: Test Cloud Functions
+        run: npm test --prefix functions
+
+      - name: Test Firestore and Storage security rules
+        run: npm run test:rules --prefix functions
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter code
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Build Flutter web
+        run: flutter build web
