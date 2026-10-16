@@ -1,276 +1,240 @@
 # Nus·Nus — Split Expenses, Simply
 
-Nus·Nus (نص نص, meaning “half-half”) is a Flutter expense-sharing application that helps people track shared expenses, understand who owes whom, and record settlements transparently.
+**Nus·Nus** (نص نص, “half-half”) is a Flutter expense-sharing app that helps groups record shared costs, understand who owes whom, and keep conversations and expenses together.
 
-Built with Flutter and Firebase, Nus·Nus supports personal expense tracking, shared groups, live expense updates, optimized balance calculations, receipt parsing with Gemini AI, and push notifications.
+Built with **Flutter, Firebase, and Google Gemini**, Nus·Nus combines expense tracking, group balances, AI-assisted receipt parsing, and a group chat where members can discuss plans, share images, and see expenses in the same timeline.
 
-## Features
+> **Payments:** Nus·Nus records expenses and settlement status. It does not initiate bank transfers or move money.
 
-### 💸 Expense Tracking
-- Create personal and shared expense groups.
-- Record expenses, choose the payer, and split costs between participants.
-- Track who added an expense and when it was created.
-- Edit or delete expenses according to the application's ownership and permission rules.
-- View expense history and outstanding balances.
+## Highlights
 
-### 🧮 Balance Calculation and Settlements
-- Calculate outstanding shares for each participant.
-- Support partial and full settlement of expense shares.
-- Net opposing debts between two participants.
-- Calculate optimized transfers to settle overall group balances with fewer payments.
-- Preserve the original expense history when settlements are recorded.
-- Validate settlement amounts against current balances on the backend to reject stale or excessive settlement requests.
+### 💬 Group chat and shared timeline
+- Chat with members inside a group.
+- View chat messages and expense cards in one chronological timeline.
+- Send text messages and share images from the gallery or camera.
+- Store new chat images in Firebase Storage instead of embedding image data in Firestore documents.
+- Load recent messages first and fetch older messages as needed.
+- Edit your own text message **once**. The app UI and Firestore security rules enforce the one-time limit.
+- Delete messages according to authorship and group-owner permissions.
+- Open shared images in a full-screen viewer with zoom support.
+- Receive push notifications for new group messages and open the relevant group from a notification, where configured.
 
-**How settlements work:** A settlement records that money was paid outside the app. Nus·Nus does not initiate bank transfers or move money. A linked account belonging to either participant in a debt pair can confirm the settlement. The backend verifies group membership, participant linkage, debt direction, and the amount before updating the relevant expense shares.
+### 💸 Expense tracking
+- Create personal and shared groups.
+- Record an expense, choose the payer, and select participants for the split.
+- View expense history, contributions, and outstanding balances.
+- Edit or delete expenses according to the app's ownership and permission rules.
+- Keep expenses in the dedicated group expenses collection; the chat timeline displays expenses without duplicating the financial records.
 
-### 🤖 Gemini AI Assistance
-- Parse bill details from text instructions and receipt images.
-- Identify the payer and participants from the supplied member list.
-- Generate proposed expense splits and validate that the amounts add up.
+### 🧮 Balances and settlements
+- Calculate outstanding shares for group members.
+- Track settlement status and show remaining balances.
+- Net opposing debts and calculate suggested transfers to simplify settling a group.
+- Validate settlement requests on the backend before changing expense records.
+
+A settlement record is not independent proof that a bank transfer occurred. Users remain responsible for completing and verifying payments outside the app.
+
+### 🤖 Gemini AI assistance
+- Extract proposed bill details from receipt images or text.
+- Suggest payer, participants, and expense splits using the available group context.
 - Ask questions about expenses, groups, and balances using the app's AI assistance.
 
-AI-generated expense details should be reviewed before they are saved. AI output is not a substitute for verifying a receipt or payment.
+Always review AI-generated amounts and receipt details before saving them.
 
-### 👥 Groups and Members
-- Manage personal and shared groups.
-- Add participants and link app accounts to group members.
-- Keep group metadata and expenses synchronized through Firestore.
-- Track individual contributions and balances.
+### 👥 Groups, accounts, and notifications
+- Manage groups and members.
+- Link app accounts to group participants where supported.
 - Support group currencies, including AED.
+- Use Firebase Cloud Messaging for configured notifications.
+- Keep notification tokens in private user documents.
 
-### 🔔 Notifications
-- Register Firebase Cloud Messaging tokens for signed-in users.
-- Notify other group members when a new shared expense is added.
-- Remove invalid notification tokens when Firebase reports them as expired or unregistered.
+### 🛡️ Security and reliability
+- Firebase Authentication protects signed-in workflows.
+- Firestore rules restrict group data to members and enforce message authorship and edit restrictions.
+- Firebase Storage rules limit access to group chat images and restrict uploads by path, type, and size.
+- Cloud Functions handle trusted operations such as group deletion and related chat cleanup.
+- Loading and error states help prevent duplicate actions and communicate failed operations.
 
-### ⏳ Loading and Error Handling
-- Display an app-wide loading overlay during critical operations.
-- Prevent additional interactions while a blocking operation is running.
-- Handle failed writes and refresh local data when necessary.
+## Technology stack
 
-## Technology Stack
-
-| Component | Technology |
+| Area | Technology |
 |---|---|
-| Frontend | Flutter and Dart |
+| Mobile and web UI | Flutter, Dart |
 | State management | Provider |
-| Responsive UI | Flutter ScreenUtil |
+| Responsive layout | Flutter ScreenUtil |
 | Authentication | Firebase Authentication |
 | Database | Cloud Firestore |
-| Backend | Firebase Cloud Functions |
-| AI | Google Gemini API |
+| Image storage | Firebase Storage |
+| Backend | Firebase Cloud Functions (Node.js) |
 | Push notifications | Firebase Cloud Messaging |
-| Testing | Flutter Test |
-| Hosting | Firebase Hosting configuration |
+| AI assistance | Google Gemini API |
+| Hosting | Firebase Hosting |
+| Tests | Flutter tests, Node.js tests, Firebase Emulator Suite |
 
-## Project Structure
+## Project structure
 
 ```text
 nus_nus/
 ├── lib/
-│   ├── data/          # Firestore and member-directory repositories
-│   ├── models/        # Expenses, groups, people and balances
-│   ├── providers/     # Authentication and application state
-│   ├── screens/       # Application screens
+│   ├── data/          # Firestore and repository logic
+│   ├── models/        # Expenses, groups, messages, people and balances
+│   ├── providers/     # Application state
+│   ├── screens/       # App screens
 │   ├── services/      # AI, notifications and supporting services
-│   ├── theme/         # Theme and application colors
-│   ├── utils/         # Settlement calculations and formatting
-│   ├── widgets/       # Reusable UI components
+│   ├── theme/         # Colors and theme
+│   ├── utils/         # Formatting and calculation helpers
+│   ├── widgets/       # Reusable UI and group chat
 │   └── main.dart
 ├── functions/
-│   ├── index.js       # Callable functions and notification triggers
-│   └── package.json
-├── test/              # Flutter unit tests
-├── assets/
-│   └── icon/
-├── android/
-├── ios/
-├── web/
+│   └── index.js       # Callable functions and notification triggers
+├── functions/rules-tests/
+│   └── firestore_rules.emulator.cjs
+├── test/              # Flutter tests
 ├── firestore.rules
+├── storage.rules
 ├── firebase.json
 ├── pubspec.yaml
 └── README.md
 ```
 
-## Prerequisites
+## Getting started
 
-Install the following tools before setting up the project:
-
-- Flutter SDK compatible with the dependencies in `pubspec.yaml`
-- Dart SDK compatible with the Flutter installation
-- Node.js 22 and npm for Cloud Functions
+### Prerequisites
+Install:
+- Flutter SDK and its compatible Dart SDK
+- Node.js 22 and npm
 - Firebase CLI
-- A Firebase project with the required services configured
-- A Gemini API key for AI functionality
+- A Firebase project with the services required by the features you want to run
+- A Gemini API key if using Gemini-powered functionality
 
-Useful installation guides:
+Useful guides: [Flutter setup](https://docs.flutter.dev/get-started/install) · [Firebase for Flutter](https://firebase.google.com/docs/flutter/setup) · [Firebase CLI](https://firebase.google.com/docs/cli) · [Cloud Functions](https://firebase.google.com/docs/functions) · [Google AI Studio](https://aistudio.google.com/)
 
-- [Flutter installation](https://docs.flutter.dev/get-started/install)
-- [Firebase for Flutter](https://firebase.google.com/docs/flutter/setup)
-- [Firebase CLI](https://firebase.google.com/docs/cli)
-- [Cloud Functions for Firebase](https://firebase.google.com/docs/functions)
-- [Google AI Studio](https://aistudio.google.com/)
-
-## Getting Started
-
-### 1. Clone the repository
+### 1. Clone and install dependencies
 
 ```bash
 git clone https://github.com/Tamil2612/nus_nus.git
 cd nus_nus
-```
-
-### 2. Install Flutter dependencies
-
-```bash
 flutter pub get
+npm ci --prefix functions
 ```
 
-### 3. Configure Firebase
+### 2. Configure Firebase
 
-Make sure the Flutter Firebase configuration files match your Firebase project.
+Ensure the Flutter platform configuration files and Firebase project alias point to the project you intend to use. For a separate Firebase project, follow the official FlutterFire setup instructions and update the configuration accordingly.
 
-The repository contains Firebase project configuration for Nus·Nus. If you are setting up a different Firebase project, regenerate or update the platform configuration files using the official Firebase Flutter setup instructions.
-
-Enable the Firebase services required by the application:
-
+Enable the services required by your chosen features:
 - Firebase Authentication
 - Cloud Firestore
-- Cloud Functions
-- Firebase Cloud Messaging, if push notifications are required
-- Firebase Hosting, if hosting the web build
+- Firebase Storage for chat images
+- Cloud Functions for trusted backend operations and notification triggers
+- Firebase Cloud Messaging for push notifications
+- Firebase Hosting if deploying the web build
 
-### 4. Configure the Gemini API key
+Before deploying, verify the active Firebase project:
 
-The Cloud Functions code reads the `GEMINI_API_KEY` environment variable, with a legacy Firebase Functions configuration fallback.
+```bash
+firebase login
+firebase projects:list
+cat .firebaserc
+```
 
-For a local Functions environment, create `functions/.env`:
+### 3. Configure Gemini
+
+Configure the Gemini API key for the backend using Firebase's supported secret configuration. For local development, use the environment setup expected by the Functions code (for example, a local `functions/.env` file when supported).
 
 ```env
 GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 ```
 
-Replace the placeholder with your own key. Do not commit real API keys, credentials, or secret files to Git.
+Replace the placeholder with your own key. Never commit real API keys, credentials, service-account files, or populated secret files to Git.
 
-For production, configure secrets using the appropriate Firebase-supported secret-management mechanism and ensure the deployed functions receive the key securely.
+### 4. Run the app
 
-### 5. Install backend dependencies
-
-```bash
-cd functions
-npm install
-cd ..
-```
-
-### 6. Run the application
-
-Run in Chrome:
-
-```bash
-flutter run -d chrome
-```
-
-Run on an available Android or iOS device:
+Run on an available device or emulator:
 
 ```bash
 flutter run
 ```
 
-Ensure that the relevant platform configuration and Firebase services are set up before testing authentication or backend functionality.
-
-## Testing
-
-Run Flutter static analysis:
+Run the web app in Chrome:
 
 ```bash
-flutter analyze
+flutter run -d chrome
 ```
 
-Run the Flutter test suite:
+Firebase authentication, database, storage, and function behavior require the relevant project configuration and permissions.
+
+## Testing and quality checks
+
+Run Flutter dependency resolution, analysis, and tests:
 
 ```bash
+flutter pub get
+flutter analyze
 flutter test
 ```
 
-Install backend dependencies and verify that the Functions source loads:
+Run the Cloud Functions test suite:
 
 ```bash
-cd functions
-npm install
-node --check index.js
+npm test --prefix functions
 ```
 
-The current `functions/package.json` does not define a working automated test suite. Consequently, `npm test` is not currently a valid passing-test command. Backend behavior should be tested separately, ideally using the Firebase Emulator Suite.
+The group-chat CI workflow also exercises Firestore and Storage rules against the Firebase Emulator Suite and builds the Flutter web app. Use the repository's workflow as the source of truth for the exact CI steps.
 
-Important scenarios to test include:
+Important manual scenarios:
+- Send, receive, edit once, and delete text messages.
+- Verify that a second edit is rejected by Firestore rules, not only hidden in the UI.
+- Upload and view images as a group member; verify unauthorized users cannot read them.
+- Test notification delivery and tap-to-open navigation.
+- Delete a group and verify the related chat data and Storage objects are cleaned up.
+- Test expense creation, balance calculations, and settlement validation.
+- Confirm loading indicators and error states behave correctly on slow or failed requests.
 
-- Creating, editing, and deleting expenses with different group roles.
-- Calculating balances with partial and full settlements.
-- Netting opposing debts correctly.
-- Rejecting settlement attempts from unrelated users.
-- Rejecting stale balances and settlement amounts above the current debt.
-- Handling concurrent settlement attempts.
-- Verifying Firestore security rules against unauthorized access.
-- Confirming that loading overlays disappear after successful and failed operations.
+## Firebase deployment
 
-## Firebase Deployment
+**Review the Firebase project and the CI results before deploying.** Rules and functions are production changes; deploy only to the intended project.
 
-Review the Firebase project and deployment configuration before deploying. Deploying backend functions, security rules, and web hosting are separate operations.
-
-### Deploy Firestore rules
+Deploy Firestore and Storage rules:
 
 ```bash
-firebase deploy --only firestore:rules
+firebase deploy --only firestore:rules,storage
 ```
 
-### Deploy Cloud Functions
+Deploy Cloud Functions:
 
 ```bash
 firebase deploy --only functions
 ```
 
-### Build the Flutter web application
+Build and deploy Flutter web hosting:
 
 ```bash
 flutter build web
-```
-
-### Deploy web hosting
-
-After building the web application:
-
-```bash
 firebase deploy --only hosting
 ```
 
-Use the correct Firebase project and environment before deploying. Verify that the necessary API keys, permissions, billing configuration, and platform settings are in place.
+Deploying rules is required for the latest chat access and one-time edit restrictions to apply in production. Deploying functions is required for backend functionality such as message notifications and group deletion cleanup. Do not run deployment commands until you have verified the active Firebase project and reviewed the changes.
 
-## Security and Privacy
+## Data and security notes
 
-- Firebase Authentication is required for protected application and backend operations.
-- Firestore rules restrict group access to members and enforce ownership and authorship constraints on expense operations.
-- The settlement callable validates the caller's group membership and connection to one of the two participants before updating expense shares.
-- AI API keys belong on the backend, not in Flutter source code or client-side configuration.
-- Push notification tokens are stored under private user documents and should only be accessible to their owner.
-- Never commit `.env` files containing real secrets, service-account credentials, or private keys.
-- Review Firestore rules and Cloud Functions behavior before deploying changes to production.
-
-## Important Notes
-
-- Nus·Nus records expenses and settlements; it does not process or transfer money.
-- A recorded settlement updates the relevant outstanding expense shares. It is not independent proof that a bank transfer occurred.
-- The balance calculator computes suggested transfers from current net balances. These suggestions may differ from the detailed pairwise debt breakdown.
-- AI-generated receipt data and expense splits should be checked by the user.
-- A successful web build does not, by itself, verify mobile builds, backend correctness, security rules, or production deployment.
+- Group messages are stored under `groups/{groupId}/messages`.
+- Expenses remain authoritative under `groups/{groupId}/expenses`; the chat timeline does not duplicate expense records.
+- New chat images are stored in Firebase Storage under group-scoped paths.
+- Firestore rules restrict chat access to group members and validate message authorship.
+- A text message can be edited once; image messages are not editable.
+- Group deletion uses a trusted backend operation to clean up related data and chat images.
+- Keep Gemini API keys and other secrets on the backend, not in client source code.
+- Review security rules and Cloud Functions changes before deploying to production.
 
 ## Contributing
 
-1. Create a feature branch.
-2. Make focused changes.
-3. Run `flutter analyze` and `flutter test`.
-4. Test relevant backend and Firestore behavior.
-5. Submit a pull request with a description of the changes and testing performed.
+1. Create a focused feature branch.
+2. Keep changes scoped and add or update relevant tests.
+3. Run `flutter analyze`, `flutter test`, and `npm test --prefix functions`.
+4. Test relevant Firebase rules and backend behavior in the Emulator Suite.
+5. Open a pull request describing the change and the checks performed.
 
 ## License
 
-No license is specified here. Add a `LICENSE` file and update this section before distributing the project under an open-source license.
+No license is specified in this repository. Add a `LICENSE` file and update this section before distributing the project under an open-source license.
