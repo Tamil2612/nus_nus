@@ -19,7 +19,7 @@ void main() {
       expect(message.text, 'Hello');
       expect(message.isEdited, isTrue);
       expect(message.imagePath, isNull);
-      expect(message.createdAt, createdAt);
+      expect(message.createdAt?.toUtc(), createdAt);
     });
 
     test('supports Storage paths and legacy image URLs', () {
