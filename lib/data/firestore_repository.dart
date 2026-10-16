@@ -123,12 +123,15 @@ class FirestoreRepository {
     }
   }
 
-  /// Overwrites an existing expense in place (edits, and per-person
-  /// paid/pending toggles via `settledBy`). Restricted server-side to
-  /// whoever originally added it (`addedBy`) or the group's creator.
+  /// Updates only editable expense fields. Never writes createdAt or
+  /// settlement allocations; manual status toggles use [updateSettledBy].
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
-      await _expensesCol(groupId).doc(expense.id).set(expense.toJson());
+      await _expensesCol(groupId).doc(expense.id).update({
+        'desc': expense.desc,
+        'amount': expense.amount,
+        'splitMap': expense.splitMap.map((k, v) => MapEntry(k.toString(), v)),
+      });
     } catch (e, st) {
       debugPrint('FirestoreRepository.updateExpense failed: $e\n$st');
       rethrow;
