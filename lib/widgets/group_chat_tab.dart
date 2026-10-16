@@ -174,9 +174,10 @@ class _GroupChatTabState extends State<GroupChatTab> {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(
       source: source,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 75,
+      // Keep chat photos reasonably sharp without uploading original camera-sized files.
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 88,
     );
 
     if (!mounted || pickedFile == null) return;
@@ -614,81 +615,118 @@ class _MessageBubble extends StatelessWidget {
     );
   }
 
-  void _showEditDialog(BuildContext context, String groupId) {
+  Future<void> _showEditDialog(BuildContext context, String groupId) async {
     final controller = TextEditingController(text: message.text);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20.r),
-        ),
-        title: Text(
-          'Edit Message',
-          style: TextStyle(
-            color: AppColors.ink,
-            fontWeight: FontWeight.bold,
-            fontSize: 18.sp,
-          ),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 4,
-          minLines: 1,
-          maxLength: GroupChatRepository.maxMessageLength,
-          style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
-          decoration: AppTheme.inputDecoration('Message…').copyWith(
-            filled: false,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final newText = controller.text.trim();
-              if (newText.length > GroupChatRepository.maxMessageLength) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Messages cannot exceed 1000 characters.')),
-                );
-                return;
-              }
-              if (newText.isNotEmpty && newText != message.text) {
-                Navigator.pop(ctx);
-                try {
-                  await GroupChatRepository.instance.editMessage(
-                    groupId: groupId,
-                    messageId: message.id,
-                    newText: newText,
-                  );
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Could not edit message: $e'),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  }
-                }
-              } else {
-                Navigator.pop(ctx);
-              }
-            },
-            style: AppTheme.solidButton.copyWith(
-              padding: WidgetStateProperty.all(
-                EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+    var saving = false;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: AppColors.paper,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20.r),
+            ),
+            title: Text(
+              'Edit Message',
+              style: TextStyle(
+                color: AppColors.ink,
+                fontWeight: FontWeight.bold,
+                fontSize: 18.sp,
               ),
             ),
-            child: const Text('Save'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              enabled: !saving,
+              maxLines: 4,
+              minLines: 1,
+              maxLength: GroupChatRepository.maxMessageLength,
+              style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
+              decoration: AppTheme.inputDecoration('Message…').copyWith(
+                filled: false,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel',
+                    style: TextStyle(color: AppColors.slate)),
+              ),
+              ElevatedButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        final newText = controller.text.trim();
+                        if (newText.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Message cannot be empty.'),
+                            ),
+                          );
+                          return;
+                        }
+                        if (newText.length >
+                            GroupChatRepository.maxMessageLength) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Messages cannot exceed 1000 characters.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        if (newText == message.text) {
+                          Navigator.of(ctx).pop();
+                          return;
+                        }
+
+                        setDialogState(() => saving = true);
+                        try {
+                          await GroupChatRepository.instance.editMessage(
+                            groupId: groupId,
+                            messageId: message.id,
+                            newText: newText,
+                          );
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                        } catch (error) {
+                          if (ctx.mounted) {
+                            setDialogState(() => saving = false);
+                          }
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Could not edit message: $error'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                style: AppTheme.solidButton.copyWith(
+                  padding: WidgetStateProperty.all(
+                    EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                  ),
+                ),
+                child: saving
+                    ? SizedBox(
+                        width: 18.r,
+                        height: 18.r,
+                        child: const CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text('Save'),
+              ),
+            ],
           ),
-        ],
-      ),
-    ).whenComplete(controller.dispose);
+        ),
+      );
+    } finally {
+      // Dispose only after the dialog route and its TextField are fully removed.
+      controller.dispose();
+    }
   }
 
   Future<void> _confirmDeleteMessage(
