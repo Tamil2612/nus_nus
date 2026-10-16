@@ -786,6 +786,11 @@ class SplitProvider extends ChangeNotifier {
     if (personId == expense.payerId) {
       return; // Cannot toggle/revert the person who paid
     }
+    // Pair settlements are allocated into settledAmounts by the trusted
+    // callable. Never let the manual paid/pending toggle override that ledger.
+    if ((expense.settledAmounts[personId] ?? 0) > 0.005) {
+      return;
+    }
 
     final isExpenseCreator = expense.addedBy == _uid;
     // Only the person who logged this expense can change its paid/pending flags.
