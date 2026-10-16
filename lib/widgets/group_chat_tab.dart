@@ -41,7 +41,9 @@ class _GroupChatTabState extends State<GroupChatTab> {
   Future<void> _loadOlderMessages(
       String groupId, List<GroupMessage> loadedMessages) async {
     if (_loadingOlderByGroup[groupId] == true ||
-        _hasMoreOlderByGroup[groupId] == false) return;
+        _hasMoreOlderByGroup[groupId] == false) {
+      return;
+    }
     final eligible = loadedMessages.where((m) => m.createdAt != null).toList()
       ..sort((a, b) => a.createdAt!.compareTo(b.createdAt!));
     if (eligible.isEmpty) {
@@ -799,7 +801,7 @@ class _MessageBubble extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) => FullScreenImageViewer(
-                      imageUrl: imageSource!,
+                      imageUrl: imageSource,
                     ),
                   ),
                 );
