@@ -669,8 +669,8 @@ class SplitProvider extends ChangeNotifier {
 
     final expense = expenses[existingIndex];
     if (expense.addedBy != _uid) return 'Only the person who created this split can delete it.';
-    if (expense.hasPaymentsFromOthers) {
-      return 'This expense has settled shares and cannot be deleted.';
+    if (expense.isSettlement || expense.hasPaymentsFromOthers) {
+      return 'This expense has settlement history and cannot be deleted.';
     }
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
@@ -699,8 +699,8 @@ class SplitProvider extends ChangeNotifier {
     if (original.addedBy != _uid) {
       return 'Only the person who created this split can edit it.';
     }
-    if (original.hasPaymentsFromOthers) {
-      return 'This expense has settled shares and cannot be edited.';
+    if (original.isSettlement || original.hasPaymentsFromOthers) {
+      return 'This expense has settlement history and cannot be edited.';
     }
 
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
