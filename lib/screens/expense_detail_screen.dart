@@ -58,7 +58,15 @@ class ExpenseDetailScreen extends StatelessWidget {
     );
 
     if (confirmed == true) {
-      provider.removeExpense(live.id);
+      final error = provider.removeExpense(live.id);
+      if (error != null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error)),
+          );
+        }
+        return;
+      }
       if (context.mounted) Navigator.pop(context); // Go back after delete
     }
   }
@@ -106,6 +114,9 @@ class ExpenseDetailScreen extends StatelessWidget {
 
     final totalParticipants = liveExpense.participantCount;
     final isAdder = liveExpense.addedBy == provider.uid;
+    final canModifyExpense = isAdder &&
+        !liveExpense.isSettlement &&
+        !liveExpense.hasPaymentsFromOthers;
     final isFullySettled = liveExpense.isFullySettled;
     final settledCount = liveExpense.settledCount;
     // Pair-settled shares are ledger allocations, not manual paid/pending flags.
@@ -139,7 +150,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                     Row(
                       children: [
                         if (isAdder) ...[
-                          if (!liveExpense.isSettlement)
+                          if (canModifyExpense)
                             IconButton(
                               icon: const Icon(Icons.edit_outlined,
                                   color: AppColors.brassSoft),
@@ -148,18 +159,14 @@ class ExpenseDetailScreen extends StatelessWidget {
                                       existing: liveExpense),
                               tooltip: 'Edit',
                             ),
-                          IconButton(
-                            icon: Icon(
-                                liveExpense.isSettlement
-                                    ? Icons.undo
-                                    : Icons.delete_outline,
-                                color: AppColors.rust),
-                            onPressed: () =>
-                                _confirmDelete(context, provider, liveExpense),
-                            tooltip: liveExpense.isSettlement
-                                ? 'Revert Settlement'
-                                : 'Delete',
-                          ),
+                          if (canModifyExpense)
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  color: AppColors.rust),
+                              onPressed: () =>
+                                  _confirmDelete(context, provider, liveExpense),
+                              tooltip: 'Delete',
+                            ),
                         ],
                         12.horizontalSpace,
                       ],
