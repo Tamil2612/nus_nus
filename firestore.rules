@@ -55,6 +55,11 @@ service cloud.firestore {
             request.auth.uid == groupData().ownerId;
         }
 
+        function hasSettledShares() {
+          return resource.data.get('settledAmounts', {}).keys().size() > 0 ||
+            resource.data.get('settledBy', []).size() > 1;
+        }
+
         function validExpense() {
           return request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
@@ -82,6 +87,7 @@ service cloud.firestore {
           (
             request.auth.uid == resource.data.addedBy &&
             request.resource.data.addedBy == resource.data.addedBy &&
+            !hasSettledShares() &&
             request.resource.data.payerId == resource.data.payerId &&
             request.resource.data.isSettlement == resource.data.isSettlement &&
             request.resource.data.createdAt == resource.data.createdAt &&
@@ -113,7 +119,8 @@ service cloud.firestore {
 
         // Only the original expense logger may delete an expense.
         allow delete: if isGroupMember() &&
-          request.auth.uid == resource.data.addedBy;
+          request.auth.uid == resource.data.addedBy &&
+          !hasSettledShares();
       }
     }
   }
