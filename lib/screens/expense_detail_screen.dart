@@ -108,8 +108,10 @@ class ExpenseDetailScreen extends StatelessWidget {
     final isAdder = liveExpense.addedBy == provider.uid;
     final isFullySettled = liveExpense.isFullySettled;
     final settledCount = liveExpense.settledCount;
-    // Legacy settlement records can't be toggled per person.
-    final canToggle = liveExpense.addedBy == provider.uid && !liveExpense.isSettlement;
+    // Pair-settled shares are ledger allocations, not manual paid/pending flags.
+    // They must not be toggled through settledBy.
+    final canToggle = liveExpense.addedBy == provider.uid &&
+        !liveExpense.isSettlement;
 
     return Scaffold(
       body: Container(
@@ -342,8 +344,14 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final isPayer = person.id == liveExpense.payerId;
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
+                      final pairSettledAmount =
+                          liveExpense.settledAmounts[person.id] ?? 0;
+                      final settledViaPair = pairSettledAmount > 0.005;
                       final isSettled = liveExpense.isPersonPaid(person.id);
                       final isPartial = liveExpense.isPersonPartiallyPaid(person.id);
+                      final canToggleThisShare = canToggle &&
+                          person.id != liveExpense.payerId &&
+                          !settledViaPair;
 
                       return GestureDetector(
                         onTap: (canToggle && !isPayer)
