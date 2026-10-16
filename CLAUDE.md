@@ -12,7 +12,7 @@ Nus·Nus (نص نص) is a smart, localized expense-splitting application designe
 
 ### 2. Automated Settlement & Pairwise Debt Minimization
 - Algorithmic Debt Optimization: Built-in settlement calculator resolves complex multi-person group debts down to the minimal possible number of transfer transactions.
-- Creditor-Gated Settlement System: For maximum trust, only the person owed money (the creditor) can officially record or confirm a settlement.
+- Creditor-Gated Settlement System: Only the linked account of the person owed money (the creditor) can record a settlement; the debtor cannot unilaterally mark the debt paid.
 - Transparent Ledger Flow: View detailed pairwise breakdowns (You owe Person A: 45 AED, Person B owes You: 90 AED) with real-time balance calculations.
 
 ### 3. Digital Receipt Feed & Group Management
