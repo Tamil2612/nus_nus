@@ -538,7 +538,6 @@ class SplitProvider extends ChangeNotifier {
     required int? payerId,
     required Set<int> splitWith,
     Map<int, double>? customSplits,
-    bool isSettlement = false,
   }) {
     final group = currentGroup;
     if (group == null) return 'Select a group first.';
@@ -575,7 +574,7 @@ class SplitProvider extends ChangeNotifier {
       desc: desc
           .trim()
           .isEmpty
-          ? (isSettlement ? 'Settlement' : 'Untitled expense')
+          ? 'Untitled expense'
           : desc.trim(),
       amount: amount,
       payerId: payerId,
@@ -624,9 +623,9 @@ class SplitProvider extends ChangeNotifier {
     Person? toPerson;
     for (final p in group.members) { if (p.id == fromId) fromPerson = p; if (p.id == toId) toPerson = p; }
     if (fromPerson == null || toPerson == null) return 'Could not find one of the people in this settlement.';
-    // Either linked account in the debtor-creditor pair may record settlement.
-    if (fromPerson.linkedUserId != _uid && toPerson.linkedUserId != _uid) {
-      return 'Only someone in this debtor-creditor pair can confirm settlement.';
+    // Only the creditor may record the settlement.
+    if (toPerson.linkedUserId != _uid) {
+      return 'Only the person owed money can record this settlement.';
     }
     final pair = SettlementCalculator.computePairBalances(
       SettlementCalculator.deriveLedgerEntries(_expensesByGroup[group.id] ?? const <Expense>[]),
@@ -659,22 +658,26 @@ class SplitProvider extends ChangeNotifier {
     }
   }
 
-  /// deleting an expense someone else logged (or your own) is a destructive
-  /// action, so it's kept restricted to whoever originally added it or the payer.
-  void removeExpense(String id) {
+  /// Deletes an unsettled expense created by the signed-in user.
+  /// Settled expenses are immutable so deletion cannot restore old debt.
+  String? removeExpense(String id) {
     final group = currentGroup;
-    if (group == null) return;
+    if (group == null) return 'Select a group first.';
 
     final existingIndex = expenses.indexWhere((e) => e.id == id);
-    if (existingIndex == -1) return;
+    if (existingIndex == -1) return 'That expense no longer exists.';
 
     final expense = expenses[existingIndex];
-    if (expense.addedBy != _uid) return; // only the expense creator may delete
+    if (expense.addedBy != _uid) return 'Only the person who created this split can delete it.';
+    if (expense.hasPaymentsFromOthers) {
+      return 'This expense has settled shares and cannot be deleted.';
+    }
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
     notifyListeners();
     _persist(FirestoreRepository.instance.deleteExpense(group.id, id));
+    return null;
   }
 
   /// Only the account that created/logged this expense may edit it.
@@ -696,13 +699,16 @@ class SplitProvider extends ChangeNotifier {
     if (original.addedBy != _uid) {
       return 'Only the person who created this split can edit it.';
     }
+    if (original.hasPaymentsFromOthers) {
+      return 'This expense has settled shares and cannot be edited.';
+    }
 
     if (amount == null || amount <= 0) return 'Enter a valid amount.';
     if (payerId == null) return 'Add at least one person first.';
     // Payer lock: who paid can't be reassigned after the fact, otherwise the
     // "only the payer can log a split" rule could be sidestepped by editing.
     if (payerId != original.payerId) {
-      return "Who paid can't be changed. Delete this split and log it again.";
+      return "Who paid can't be changed.";
     }
     if (splitWith.isEmpty) return 'Pick who this should be split between.';
 
