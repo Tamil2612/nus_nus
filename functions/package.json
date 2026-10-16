@@ -5,8 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "echo 'No build step required'",
-    "test": "node --test notifications.test.js",
-    "test:rules": "firebase emulators:exec --config ../firebase.json --only firestore,storage --project demo-nus-nus \"node --test rules-tests/firestore_rules.test.cjs\""
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
@@ -18,10 +17,5 @@
     "@google/generative-ai": "^0.24.1",
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^5.1.1"
-  },
-  "devDependencies": {
-    "@firebase/rules-unit-testing": "^4.0.1",
-    "firebase": "^11.10.0",
-    "firebase-tools": "^14.22.0"
   }
 }
