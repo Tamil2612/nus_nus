@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:image_picker/image_picker.dart';
@@ -32,6 +34,46 @@ class GroupChatTab extends StatefulWidget {
 class _GroupChatTabState extends State<GroupChatTab> {
   final TextEditingController _messageController = TextEditingController();
   bool _sending = false;
+  final Map<String, List<GroupMessage>> _olderMessagesByGroup = {};
+  final Map<String, bool> _hasMoreOlderByGroup = {};
+  final Map<String, bool> _loadingOlderByGroup = {};
+
+  Future<void> _loadOlderMessages(
+      String groupId, List<GroupMessage> loadedMessages) async {
+    if (_loadingOlderByGroup[groupId] == true ||
+        _hasMoreOlderByGroup[groupId] == false) return;
+    final eligible = loadedMessages.where((m) => m.createdAt != null).toList()
+      ..sort((a, b) => a.createdAt!.compareTo(b.createdAt!));
+    if (eligible.isEmpty) {
+      setState(() => _hasMoreOlderByGroup[groupId] = false);
+      return;
+    }
+    setState(() => _loadingOlderByGroup[groupId] = true);
+    try {
+      final page = await GroupChatRepository.instance.fetchOlderMessages(
+        groupId: groupId,
+        before: eligible.first,
+      );
+      if (!mounted) return;
+      final byId = <String, GroupMessage>{
+        for (final message in (_olderMessagesByGroup[groupId] ?? const <GroupMessage>[]))
+          message.id: message,
+        for (final message in page) message.id: message,
+      };
+      setState(() {
+        _olderMessagesByGroup[groupId] = byId.values.toList();
+        _hasMoreOlderByGroup[groupId] = page.length == GroupChatRepository.pageSize;
+      });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load older messages: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingOlderByGroup[groupId] = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -61,6 +103,12 @@ class _GroupChatTabState extends State<GroupChatTab> {
     final uid = provider.uid;
     final text = _messageController.text.trim();
     if (_sending || group == null || uid == null || text.isEmpty) return;
+    if (text.length > GroupChatRepository.maxMessageLength) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Messages cannot exceed 1000 characters.')),
+      );
+      return;
+    }
 
     setState(() => _sending = true);
     try {
@@ -119,7 +167,7 @@ class _GroupChatTabState extends State<GroupChatTab> {
       ),
     );
 
-    if (source == null) return;
+    if (!mounted || source == null) return;
 
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(
@@ -129,18 +177,17 @@ class _GroupChatTabState extends State<GroupChatTab> {
       imageQuality: 75,
     );
 
-    if (pickedFile == null) return;
+    if (!mounted || pickedFile == null) return;
 
     setState(() => _sending = true);
     try {
       final bytes = await pickedFile.readAsBytes();
-      final base64Image = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-      await GroupChatRepository.instance.sendMessage(
+      if (!mounted) return;
+      await GroupChatRepository.instance.sendImageMessage(
         groupId: group.id,
         senderUid: uid,
         senderName: _currentUserName(provider),
-        text: '',
-        imageUrl: base64Image,
+        bytes: bytes,
       );
     } catch (error) {
       if (mounted) {
@@ -278,7 +325,21 @@ class _GroupChatTabState extends State<GroupChatTab> {
                 );
               }
 
-              final messages = snapshot.data ?? const <GroupMessage>[];
+              final streamedMessages = snapshot.data ?? const <GroupMessage>[];
+              final messagesById = <String, GroupMessage>{
+                for (final message in (_olderMessagesByGroup[group.id] ?? const <GroupMessage>[]))
+                  message.id: message,
+                for (final message in streamedMessages) message.id: message,
+              };
+              final messages = messagesById.values.toList()
+                ..sort((a, b) {
+                  final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                  final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                  final order = bTime.compareTo(aTime);
+                  return order != 0 ? order : b.id.compareTo(a.id);
+                });
+              final hasMoreOlder = _hasMoreOlderByGroup[group.id] ??
+                  streamedMessages.length >= GroupChatRepository.pageSize;
               final timeline = <_TimelineItem>[
                 for (final message in messages) _TimelineItem.message(message),
                 for (final expense in provider.expenses)
@@ -341,8 +402,28 @@ class _GroupChatTabState extends State<GroupChatTab> {
               return ListView.builder(
                 reverse: true,
                 padding: EdgeInsets.fromLTRB(14.w, 12.h, 14.w, 16.h),
-                itemCount: timeline.length,
+                itemCount: timeline.length + (hasMoreOlder ? 1 : 0),
                 itemBuilder: (context, index) {
+                  if (index == timeline.length) {
+                    final loading = _loadingOlderByGroup[group.id] == true;
+                    return Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12.h),
+                      child: Center(
+                        child: TextButton(
+                          onPressed: loading
+                              ? null
+                              : () => _loadOlderMessages(group.id, messages),
+                          child: loading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Load older messages'),
+                        ),
+                      ),
+                    );
+                  }
                   final item = timeline[index];
                   final currentDate = item.timestamp;
 
@@ -425,6 +506,7 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({required this.message, required this.isMine});
 
   Widget _buildImage(String url) {
+    if (url.startsWith('groups/')) return _StorageChatImage(path: url, fit: BoxFit.cover);
     if (url.startsWith('data:image')) {
       final commaIndex = url.indexOf(',');
       final base64Str = commaIndex != -1 ? url.substring(commaIndex + 1) : url;
@@ -448,7 +530,7 @@ class _MessageBubble extends StatelessWidget {
   void _showOptionsSheet(
       BuildContext context, String? groupId, bool isGroupOwner) {
     if (groupId == null || groupId.isEmpty) return;
-    final isImage = message.imageUrl != null && message.imageUrl!.isNotEmpty;
+    final isImage = (message.imagePath != null && message.imagePath!.isNotEmpty) || (message.imageUrl != null && message.imageUrl!.isNotEmpty);
     final canEdit = isMine && !isImage;
     final canDelete = isMine || isGroupOwner;
 
@@ -552,6 +634,7 @@ class _MessageBubble extends StatelessWidget {
           autofocus: true,
           maxLines: 4,
           minLines: 1,
+          maxLength: GroupChatRepository.maxMessageLength,
           style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
           decoration: AppTheme.inputDecoration('Message…').copyWith(
             filled: false,
@@ -566,6 +649,12 @@ class _MessageBubble extends StatelessWidget {
           ElevatedButton(
             onPressed: () async {
               final newText = controller.text.trim();
+              if (newText.length > GroupChatRepository.maxMessageLength) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Messages cannot exceed 1000 characters.')),
+                );
+                return;
+              }
               if (newText.isNotEmpty && newText != message.text) {
                 Navigator.pop(ctx);
                 try {
@@ -597,7 +686,7 @@ class _MessageBubble extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 
   Future<void> _confirmDeleteMessage(
@@ -681,7 +770,8 @@ class _MessageBubble extends StatelessWidget {
         ? message.senderName[0].toUpperCase()
         : 'M';
 
-    final hasImage = message.imageUrl != null && message.imageUrl!.isNotEmpty;
+    final hasImage = (message.imagePath != null && message.imagePath!.isNotEmpty) || (message.imageUrl != null && message.imageUrl!.isNotEmpty);
+    final imageSource = message.imagePath ?? message.imageUrl;
     final isMultiLine = message.text.contains('\n') || message.text.length > 32;
 
     final timeString = message.isEdited
@@ -709,7 +799,7 @@ class _MessageBubble extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) => FullScreenImageViewer(
-                      imageUrl: message.imageUrl!,
+                      imageUrl: imageSource!,
                     ),
                   ),
                 );
@@ -744,7 +834,7 @@ class _MessageBubble extends StatelessWidget {
                           ),
                           child: Stack(
                             children: [
-                              _buildImage(message.imageUrl!),
+                              _buildImage(imageSource!),
                               Positioned(
                                 bottom: 8.h,
                                 right: 8.w,
@@ -1701,6 +1791,48 @@ class _DateHeaderChip extends StatelessWidget {
   }
 }
 
+class _StorageChatImage extends StatefulWidget {
+  final String path;
+  final BoxFit fit;
+  const _StorageChatImage({required this.path, required this.fit});
+
+  @override
+  State<_StorageChatImage> createState() => _StorageChatImageState();
+}
+
+class _StorageChatImageState extends State<_StorageChatImage> {
+  late Future<Uint8List?> _future;
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+  Future<Uint8List?> _load() => FirebaseStorage.instance
+      .ref(widget.path).getData(GroupChatRepository.maxImageBytes);
+  @override
+  void didUpdateWidget(covariant _StorageChatImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path) _future = _load();
+  }
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Icon(Icons.broken_image, color: AppColors.slate);
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator(
+              strokeWidth: 2, color: AppColors.brassSoft));
+          }
+          return Image.memory(snapshot.data!, fit: widget.fit,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.broken_image, color: AppColors.slate));
+        },
+      );
+}
+
 class FullScreenImageViewer extends StatefulWidget {
   final String imageUrl;
 
@@ -1719,26 +1851,19 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
   }
 
   Widget _buildImage(String url) {
+    if (url.startsWith('groups/')) return _StorageChatImage(path: url, fit: BoxFit.contain);
     if (url.startsWith('data:image')) {
       final commaIndex = url.indexOf(',');
       final base64Str = commaIndex != -1 ? url.substring(commaIndex + 1) : url;
-      return Image.memory(
-        base64Decode(base64Str),
-        fit: BoxFit.contain,
+      return Image.memory(base64Decode(base64Str), fit: BoxFit.contain,
         filterQuality: FilterQuality.high,
         errorBuilder: (_, __, ___) => const Center(
-          child: Icon(Icons.broken_image, color: AppColors.slate, size: 48),
-        ),
-      );
+          child: Icon(Icons.broken_image, color: AppColors.slate, size: 48)));
     }
-    return Image.network(
-      url,
-      fit: BoxFit.contain,
+    return Image.network(url, fit: BoxFit.contain,
       filterQuality: FilterQuality.high,
       errorBuilder: (_, __, ___) => const Center(
-        child: Icon(Icons.broken_image, color: AppColors.slate, size: 48),
-      ),
-    );
+        child: Icon(Icons.broken_image, color: AppColors.slate, size: 48)));
   }
 
   @override
