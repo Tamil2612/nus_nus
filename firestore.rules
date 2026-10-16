@@ -56,7 +56,8 @@ service cloud.firestore {
         }
 
         function hasSettledShares() {
-          return resource.data.get('settledAmounts', {}).keys().size() > 0 ||
+          return resource.data.get('isSettlement', false) == true ||
+            resource.data.get('settledAmounts', {}).keys().size() > 0 ||
             resource.data.get('settledBy', []).size() > 1;
         }
 
