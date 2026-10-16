@@ -218,6 +218,98 @@ exports.onExpenseCreated = functions.firestore
     return null;
   });
 
+// Notify active group members about chat messages; exclude the sender.
+exports.onGroupMessageCreated = functions.firestore
+  .document('groups/{groupId}/messages/{messageId}')
+  .onCreate(async (snapshot, context) => {
+    const message = snapshot.data() || {};
+    const senderUid = typeof message.senderUid === 'string' ? message.senderUid : '';
+    if (!senderUid || (!String(message.text || '').trim() && !message.imagePath)) return null;
+    try {
+      const groupSnap = await db.collection('groups').doc(context.params.groupId).get();
+      if (!groupSnap.exists) return null;
+      const group = groupSnap.data() || {};
+      if (group.isPersonal === true) return null;
+      const recipients = [...new Set((Array.isArray(group.memberUids) ? group.memberUids : [])
+        .filter((uid) => typeof uid === 'string' && uid && uid !== senderUid))];
+      const pushDocs = await Promise.all(recipients.map((uid) =>
+        db.collection('users').doc(uid).collection('private').doc('push').get()));
+      const title = String(group.name || 'Group chat').slice(0, 60);
+      const preview = message.imagePath ? 'Shared a photo' : String(message.text || '').trim().slice(0, 100);
+      const payloads = [];
+      const owners = [];
+      pushDocs.forEach((doc, index) => {
+        if (!doc.exists) return;
+        const tokens = Array.isArray((doc.data() || {}).tokens)
+          ? doc.data().tokens.filter((token) => typeof token === 'string' && token)
+          : [];
+        tokens.forEach((token) => {
+          payloads.push({
+            token,
+            notification: { title, body: `${String(message.senderName || 'A member').slice(0, 40)}: ${preview}` },
+            data: { type: 'group_message', groupId: context.params.groupId, messageId: context.params.messageId },
+            android: { priority: 'high', notification: { channelId: 'expenses', sound: 'default' } },
+            apns: { payload: { aps: { sound: 'default', 'thread-id': context.params.groupId } } }
+          });
+          owners.push({ uid: recipients[index], token });
+        });
+      });
+      for (let start = 0; start < payloads.length; start += 500) {
+        const response = await admin.messaging().sendEach(payloads.slice(start, start + 500));
+        const removals = new Map();
+        response.responses.forEach((result, index) => {
+          if (result.success) return;
+          const code = result.error && result.error.code;
+          if (code === 'messaging/registration-token-not-registered' ||
+              code === 'messaging/invalid-registration-token') {
+            const owner = owners[start + index];
+            if (!removals.has(owner.uid)) removals.set(owner.uid, []);
+            removals.get(owner.uid).push(owner.token);
+          } else {
+            console.warn('Group message notification failed:', code || result.error);
+          }
+        });
+        await Promise.all([...removals].map(([uid, tokens]) =>
+          db.collection('users').doc(uid).collection('private').doc('push')
+            .update({ tokens: admin.firestore.FieldValue.arrayRemove(...tokens) })));
+      }
+    } catch (error) {
+      console.error('Error sending group chat notification:', error);
+    }
+    return null;
+  });
+
+// Owner-only group deletion callable. The client cannot delete expenses added
+// by other members, so recursive deletion must run with Admin privileges.
+exports.deleteGroup = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to delete this group.');
+  }
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  if (!groupId || groupId.length > 200 || groupId.includes('/')) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid group ID.');
+  }
+  const groupRef = db.collection('groups').doc(groupId);
+  const groupSnap = await groupRef.get();
+  if (!groupSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Group not found.');
+  }
+  if (groupSnap.data().ownerId !== context.auth.uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the group owner can delete this group.');
+  }
+  try {
+    const [objects] = await admin.storage().bucket().getFiles({
+      prefix: `groups/${groupId}/chat/`
+    });
+    await Promise.all(objects.map((object) => object.delete()));
+    await db.recursiveDelete(groupRef);
+    return { deleted: true };
+  } catch (error) {
+    console.error('deleteGroup failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not completely delete the group. Please try again.');
+  }
+});
+
 // Health check function
 exports.healthCheck = functions.https.onRequest((req, res) => {
   res.status(200).send({ status: 'OK', timestamp: new Date().toISOString() });
