@@ -534,7 +534,8 @@ class _MessageBubble extends StatelessWidget {
       BuildContext context, String? groupId, bool isGroupOwner) {
     if (groupId == null || groupId.isEmpty) return;
     final isImage = (message.imagePath != null && message.imagePath!.isNotEmpty) || (message.imageUrl != null && message.imageUrl!.isNotEmpty);
-    final canEdit = isMine && !isImage;
+    // A text message can be edited once; Firestore rules enforce this too.
+    final canEdit = isMine && !isImage && !message.isEdited;
     final canDelete = isMine || isGroupOwner;
 
     if (!canEdit && !canDelete) return;
@@ -621,110 +622,258 @@ class _MessageBubble extends StatelessWidget {
     try {
       await showDialog<void>(
         context: context,
+        barrierDismissible: false,
         builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            backgroundColor: AppColors.paper,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20.r),
-            ),
-            title: Text(
-              'Edit Message',
-              style: TextStyle(
-                color: AppColors.ink,
-                fontWeight: FontWeight.bold,
-                fontSize: 18.sp,
+          builder: (ctx, setDialogState) {
+            final textLength = controller.text.trim().length;
+            final canSave = textLength > 0 &&
+                textLength <= GroupChatRepository.maxMessageLength &&
+                controller.text.trim() != message.text &&
+                !saving;
+            return Dialog(
+              backgroundColor: AppColors.paper,
+              insetPadding: EdgeInsets.symmetric(horizontal: 22.w),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28.r),
               ),
-            ),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              enabled: !saving,
-              maxLines: 4,
-              minLines: 1,
-              maxLength: GroupChatRepository.maxMessageLength,
-              style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
-              decoration: AppTheme.inputDecoration('Message…').copyWith(
-                filled: false,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: saving ? null : () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.slate)),
-              ),
-              ElevatedButton(
-                onPressed: saving
-                    ? null
-                    : () async {
-                        final newText = controller.text.trim();
-                        if (newText.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Message cannot be empty.'),
-                            ),
-                          );
-                          return;
-                        }
-                        if (newText.length >
-                            GroupChatRepository.maxMessageLength) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Messages cannot exceed 1000 characters.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (newText == message.text) {
-                          Navigator.of(ctx).pop();
-                          return;
-                        }
-
-                        setDialogState(() => saving = true);
-                        try {
-                          await GroupChatRepository.instance.editMessage(
-                            groupId: groupId,
-                            messageId: message.id,
-                            newText: newText,
-                          );
-                          if (ctx.mounted) Navigator.of(ctx).pop();
-                        } catch (error) {
-                          if (ctx.mounted) {
-                            setDialogState(() => saving = false);
-                          }
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Could not edit message: $error'),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
-                        }
-                      },
-                style: AppTheme.solidButton.copyWith(
-                  padding: WidgetStateProperty.all(
-                    EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
-                  ),
-                ),
-                child: saving
-                    ? SizedBox(
-                        width: 18.r,
-                        height: 18.r,
-                        child: const CircularProgressIndicator(
-                          strokeWidth: 2,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(22.w, 24.h, 22.w, 18.h),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 46.r,
+                          height: 46.r,
+                          decoration: BoxDecoration(
+                            color: AppColors.brass.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(15.r),
+                          ),
+                          child: Icon(
+                            Icons.edit_note_rounded,
+                            color: AppColors.ink,
+                            size: 27.r,
+                          ),
                         ),
-                      )
-                    : const Text('Save'),
+                        12.horizontalSpace,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Edit message',
+                                style: TextStyle(
+                                  color: AppColors.ink,
+                                  fontSize: 19.sp,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              3.verticalSpace,
+                              Text(
+                                'Make it right before saving',
+                                style: TextStyle(
+                                  color: AppColors.slate,
+                                  fontSize: 12.sp,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: saving ? null : () => Navigator.of(ctx).pop(),
+                          icon: Icon(Icons.close_rounded,
+                              color: AppColors.slate, size: 22.r),
+                        ),
+                      ],
+                    ),
+                    20.verticalSpace,
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 12.w, vertical: 10.h),
+                      decoration: BoxDecoration(
+                        color: AppColors.brass.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(13.r),
+                        border: Border.all(
+                          color: AppColors.brass.withValues(alpha: 0.28),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline_rounded,
+                              size: 17.r, color: AppColors.ink),
+                          8.horizontalSpace,
+                          Expanded(
+                            child: Text(
+                              'You can edit this message only once. You cannot undo this change.',
+                              style: TextStyle(
+                                color: AppColors.ink,
+                                fontSize: 12.sp,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    16.verticalSpace,
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      enabled: !saving,
+                      maxLines: 5,
+                      minLines: 2,
+                      maxLength: GroupChatRepository.maxMessageLength,
+                      onChanged: (_) => setDialogState(() {}),
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 15.sp,
+                        height: 1.45,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Write your message…',
+                        hintStyle: TextStyle(
+                          color: AppColors.slate.withValues(alpha: 0.8),
+                          fontSize: 14.sp,
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        counterText: '',
+                        contentPadding: EdgeInsets.all(15.r),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16.r),
+                          borderSide: BorderSide(
+                            color: AppColors.slate.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16.r),
+                          borderSide: BorderSide(
+                            color: AppColors.slate.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16.r),
+                          borderSide: const BorderSide(
+                            color: AppColors.brass,
+                            width: 1.6,
+                          ),
+                        ),
+                      ),
+                    ),
+                    7.verticalSpace,
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '$textLength / ${GroupChatRepository.maxMessageLength}',
+                        style: TextStyle(
+                          color: textLength >
+                                  GroupChatRepository.maxMessageLength
+                              ? AppColors.rust
+                              : AppColors.slate,
+                          fontSize: 11.sp,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    20.verticalSpace,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: saving
+                                ? null
+                                : () => Navigator.of(ctx).pop(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.ink,
+                              side: BorderSide(
+                                color: AppColors.slate.withValues(alpha: 0.3),
+                              ),
+                              padding: EdgeInsets.symmetric(vertical: 13.h),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14.r),
+                              ),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        10.horizontalSpace,
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: canSave
+                                ? () async {
+                                    setDialogState(() => saving = true);
+                                    try {
+                                      await GroupChatRepository.instance.editMessage(
+                                        groupId: groupId,
+                                        messageId: message.id,
+                                        newText: controller.text.trim(),
+                                      );
+                                      if (ctx.mounted) {
+                                        Navigator.of(ctx).pop();
+                                      }
+                                    } catch (error) {
+                                      if (ctx.mounted) {
+                                        setDialogState(() => saving = false);
+                                      }
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                                'Could not edit message: $error'),
+                                            behavior: SnackBarBehavior.floating,
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  }
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.ink,
+                              disabledBackgroundColor:
+                                  AppColors.ink.withValues(alpha: 0.25),
+                              foregroundColor: AppColors.paper,
+                              disabledForegroundColor:
+                                  AppColors.paper.withValues(alpha: 0.7),
+                              elevation: 0,
+                              padding: EdgeInsets.symmetric(vertical: 13.h),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14.r),
+                              ),
+                            ),
+                            child: saving
+                                ? SizedBox(
+                                    width: 18.r,
+                                    height: 18.r,
+                                    child: const CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.paper,
+                                    ),
+                                  )
+                                : const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.check_rounded, size: 18),
+                                      SizedBox(width: 5),
+                                      Text('Save changes'),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            );
+          },
         ),
       );
     } finally {
-      // Dispose only after the dialog route and its TextField are fully removed.
       controller.dispose();
     }
   }
