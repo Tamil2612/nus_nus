@@ -34,13 +34,16 @@ jobs:
           cache: true
 
       - name: Install Cloud Functions dependencies
-        run: npm install --prefix functions
+        run: npm ci --prefix functions
+
+      - name: Install emulator test tools without changing the lockfile
+        run: npm install --prefix functions --no-save @firebase/rules-unit-testing@^4.0.1 firebase@^11.10.0 firebase-tools@^14.22.0
 
       - name: Test Cloud Functions
         run: npm test --prefix functions
 
       - name: Test Firestore and Storage security rules
-        run: npm run test:rules --prefix functions
+        run: ./functions/node_modules/.bin/firebase emulators:exec --config firebase.json --only firestore,storage --project demo-nus-nus "node --test functions/rules-tests/firestore_rules.emulator.cjs"
 
       - name: Resolve Flutter dependencies
         run: flutter pub get
