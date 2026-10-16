@@ -40,7 +40,7 @@ class GroupMessage {
       text: json['text'] as String? ?? '',
       imagePath: json['imagePath'] as String?,
       imageUrl: json['imageUrl'] as String?,
-      createdAt: createdAt ?? DateTime.now(),
+      createdAt: createdAt,
       isEdited: json['isEdited'] as bool? ?? false,
     );
   }
