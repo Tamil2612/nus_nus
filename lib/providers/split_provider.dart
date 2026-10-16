@@ -579,7 +579,7 @@ class SplitProvider extends ChangeNotifier {
       amount: amount,
       payerId: payerId,
       splitMap: finalSplitMap,
-      isSettlement: isSettlement,
+      isSettlement: false,
       settledBy: {payerId},
       // The person who paid is already paid/settled
       addedBy: _uid,
