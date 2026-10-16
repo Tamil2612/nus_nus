@@ -78,14 +78,18 @@ service cloud.firestore {
           request.resource.data.createdAt == request.time;
 
         // Authors can edit text only; sender, timestamp and image are immutable.
+        // A text message may be edited once. The isEdited flag is permanent,
+        // and a second update is rejected even if the client bypasses the UI.
         allow update: if chatGroupMember() &&
           request.auth.uid == resource.data.senderUid &&
           !resource.data.keys().hasAny(['imagePath', 'imageUrl']) &&
+          (!('isEdited' in resource.data) || resource.data.isEdited == false) &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['text', 'isEdited']) &&
           request.resource.data.text is string &&
           request.resource.data.text.size() > 0 &&
           request.resource.data.text.size() <= 1000 &&
+          request.resource.data.text != resource.data.text &&
           request.resource.data.isEdited == true;
 
         allow delete: if chatGroupMember() &&
