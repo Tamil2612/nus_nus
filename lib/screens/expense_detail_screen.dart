@@ -447,11 +447,16 @@ class ExpenseDetailScreen extends StatelessWidget {
                                         fontWeight: FontWeight.w900,
                                         color: AppColors.ink),
                                   ),
-                                  if (canToggle && !isPayer)
+                                  if (settledViaPair ||
+                                      (canToggle && !isPayer))
                                     Padding(
                                       padding: EdgeInsets.only(top: 4.h),
                                       child: Text(
-                                        isSettled ? 'Tap to mark pending' : 'Tap to mark paid',
+                                        settledViaPair
+                                            ? 'Settled via pair settlement'
+                                            : (isSettled
+                                                ? 'Tap to mark pending'
+                                                : 'Tap to mark paid'),
                                         style: TextStyle(
                                           fontSize: 8.sp,
                                           color: AppColors.slate,
