@@ -19,32 +19,31 @@ class ExpenseDetailScreen extends StatelessWidget {
 
   const ExpenseDetailScreen({super.key, required this.expense});
 
-  Future<void> _confirmDelete(BuildContext context, SplitProvider provider,
-      Expense live) async {
+  Future<void> _confirmDelete(
+      BuildContext context, SplitProvider provider, Expense live) async {
     final isSettlement = live.isSettlement;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.paper,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16.r)),
-        title: Text(
-            isSettlement ? 'Revert settlement?' : 'Delete this split?',
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        title: Text(isSettlement ? 'Revert settlement?' : 'Delete this split?',
             style: const TextStyle(
                 color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
           isSettlement
               ? 'This will remove the payment record and restore the previous balances. '
-              'This action cannot be undone.'
+                  'This action cannot be undone.'
               : 'This will permanently remove this expense from the group record. '
-              'This action cannot be undone.',
+                  'This action cannot be undone.',
           style: const TextStyle(color: AppColors.slate),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-                'Cancel', style: TextStyle(color: AppColors.slate)),
+            child:
+                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -58,8 +57,8 @@ class ExpenseDetailScreen extends StatelessWidget {
     );
 
     if (confirmed == true) {
+      if (context.mounted) Navigator.pop(context); // Go back to group detail
       provider.removeExpense(live.id);
-      if (context.mounted) Navigator.pop(context); // Go back after delete
     }
   }
 
@@ -84,7 +83,11 @@ class ExpenseDetailScreen extends StatelessWidget {
     // instead of rendering stale/dead data.
     if (live == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (Navigator.canPop(context)) Navigator.pop(context);
+        if (context.mounted &&
+            ModalRoute.of(context)?.isCurrent == true &&
+            Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
       });
       return const Scaffold(
         backgroundColor: AppColors.ink,
@@ -109,7 +112,8 @@ class ExpenseDetailScreen extends StatelessWidget {
     final isFullySettled = liveExpense.isFullySettled;
     final settledCount = liveExpense.settledCount;
     // Legacy settlement records can't be toggled per person.
-    final canToggle = liveExpense.addedBy == provider.uid && !liveExpense.isSettlement;
+    final canToggle =
+        liveExpense.addedBy == provider.uid && !liveExpense.isSettlement;
 
     return Scaffold(
       body: Container(
@@ -130,8 +134,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
-                      icon: const Icon(
-                          Icons.arrow_back, color: AppColors.paper),
+                      icon:
+                          const Icon(Icons.arrow_back, color: AppColors.paper),
                       onPressed: () => Navigator.pop(context),
                     ),
                     Row(
@@ -141,9 +145,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                             IconButton(
                               icon: const Icon(Icons.edit_outlined,
                                   color: AppColors.brassSoft),
-                              onPressed: () =>
-                                  showExpenseFormSheet(context,
-                                      existing: liveExpense),
+                              onPressed: () => showExpenseFormSheet(context,
+                                  existing: liveExpense),
                               tooltip: 'Edit',
                             ),
                           IconButton(
@@ -203,7 +206,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                                   decoration: BoxDecoration(
                                     color: isFullySettled
                                         ? AppColors.sage.withValues(alpha: 0.15)
-                                        : AppColors.brass.withValues(alpha: 0.1),
+                                        : AppColors.brass
+                                            .withValues(alpha: 0.1),
                                     shape: BoxShape.circle,
                                   ),
                                   child: Icon(
@@ -293,12 +297,13 @@ class ExpenseDetailScreen extends StatelessWidget {
                           Row(
                             children: List.generate(
                               15,
-                                  (index) => Expanded(
+                              (index) => Expanded(
                                 child: Container(
                                   margin: EdgeInsets.symmetric(horizontal: 2.w),
                                   height: 4.h,
                                   decoration: BoxDecoration(
-                                    color: AppColors.ink.withValues(alpha: 0.05),
+                                    color:
+                                        AppColors.ink.withValues(alpha: 0.05),
                                     borderRadius: BorderRadius.circular(2.r),
                                   ),
                                 ),
@@ -343,14 +348,15 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
                       final isSettled = liveExpense.isPersonPaid(person.id);
-                      final isPartial = liveExpense.isPersonPartiallyPaid(person.id);
+                      final isPartial =
+                          liveExpense.isPersonPartiallyPaid(person.id);
 
                       return GestureDetector(
                         onTap: (canToggle && !isPayer)
                             ? () {
-                          provider.togglePersonSettlement(
-                              liveExpense.id, person.id);
-                        }
+                                provider.togglePersonSettlement(
+                                    liveExpense.id, person.id);
+                              }
                             : null,
                         child: Container(
                           margin: EdgeInsets.only(bottom: 12.h),
@@ -397,12 +403,19 @@ class ExpenseDetailScreen extends StatelessWidget {
                                               horizontal: 8.w, vertical: 2.h),
                                           decoration: BoxDecoration(
                                             color: isSettled
-                                                ? AppColors.sage.withValues(alpha: 0.15)
-                                                : AppColors.brass.withValues(alpha: 0.1),
-                                            borderRadius: BorderRadius.circular(6.r),
+                                                ? AppColors.sage
+                                                    .withValues(alpha: 0.15)
+                                                : AppColors.brass
+                                                    .withValues(alpha: 0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(6.r),
                                           ),
                                           child: Text(
-                                            isSettled ? 'PAID' : (isPartial ? 'PARTIAL' : 'PENDING'),
+                                            isSettled
+                                                ? 'PAID'
+                                                : (isPartial
+                                                    ? 'PARTIAL'
+                                                    : 'PENDING'),
                                             style: TextStyle(
                                               fontSize: 9.sp,
                                               fontWeight: FontWeight.w900,
@@ -432,8 +445,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text(
-                                    fmtCurrency(share,
-                                        provider.currentGroup!.currency),
+                                    fmtCurrency(
+                                        share, provider.currentGroup!.currency),
                                     style: TextStyle(
                                         fontSize: 14.sp,
                                         fontWeight: FontWeight.w900,
@@ -443,7 +456,9 @@ class ExpenseDetailScreen extends StatelessWidget {
                                     Padding(
                                       padding: EdgeInsets.only(top: 4.h),
                                       child: Text(
-                                        isSettled ? 'Tap to mark pending' : 'Tap to mark paid',
+                                        isSettled
+                                            ? 'Tap to mark pending'
+                                            : 'Tap to mark paid',
                                         style: TextStyle(
                                           fontSize: 8.sp,
                                           color: AppColors.slate,

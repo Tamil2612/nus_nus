@@ -29,12 +29,13 @@ class GroupChatRepository {
         );
   }
 
-  /// Sends a text message. Validation is repeated in Firestore Rules.
+  /// Sends a text message or image message. Validation is repeated in Firestore Rules.
   Future<void> sendMessage({
     required String groupId,
     required String senderUid,
     required String senderName,
     required String text,
+    String? imageUrl,
   }) async {
     final trimmed = text.trim();
     if (groupId.trim().isEmpty) {
@@ -43,15 +44,44 @@ class GroupChatRepository {
     if (senderUid.trim().isEmpty) {
       throw ArgumentError('You must be signed in to send a message.');
     }
-    if (trimmed.isEmpty || trimmed.length > 1000) {
-      throw ArgumentError('Messages must contain 1–1000 characters.');
+    if (trimmed.isEmpty && (imageUrl == null || imageUrl.isEmpty)) {
+      throw ArgumentError('Messages must contain 1–1000 characters or an image.');
     }
 
-    await _messages(groupId).add({
+    final data = <String, dynamic>{
       'senderUid': senderUid,
       'senderName': senderName.trim().isEmpty ? 'Member' : senderName.trim(),
       'text': trimmed,
       'createdAt': FieldValue.serverTimestamp(),
+    };
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      data['imageUrl'] = imageUrl;
+    }
+
+    await _messages(groupId).add(data);
+  }
+
+  /// Updates the text of an existing message.
+  Future<void> editMessage({
+    required String groupId,
+    required String messageId,
+    required String newText,
+  }) async {
+    final trimmed = newText.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError('Message cannot be empty.');
+    }
+    await _messages(groupId).doc(messageId).update({
+      'text': trimmed,
+      'isEdited': true,
     });
+  }
+
+  /// Deletes a message doc from group chat.
+  Future<void> deleteMessage({
+    required String groupId,
+    required String messageId,
+  }) async {
+    await _messages(groupId).doc(messageId).delete();
   }
 }

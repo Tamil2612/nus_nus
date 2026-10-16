@@ -6,14 +6,18 @@ class GroupMessage {
   final String senderUid;
   final String senderName;
   final String text;
+  final String? imageUrl;
   final DateTime? createdAt;
+  final bool isEdited;
 
   const GroupMessage({
     required this.id,
     required this.senderUid,
     required this.senderName,
     required this.text,
+    this.imageUrl,
     this.createdAt,
+    this.isEdited = false,
   });
 
   factory GroupMessage.fromJson(String id, Map<String, dynamic> json) {
@@ -30,7 +34,10 @@ class GroupMessage {
       senderUid: json['senderUid'] as String? ?? '',
       senderName: json['senderName'] as String? ?? 'Member',
       text: json['text'] as String? ?? '',
+      imageUrl: json['imageUrl'] as String?,
       createdAt: createdAt,
+      isEdited: json['isEdited'] as bool? ?? false,
     );
   }
 }
+

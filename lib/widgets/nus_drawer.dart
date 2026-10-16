@@ -136,8 +136,8 @@ class NusDrawer extends StatelessWidget {
                             );
                           }
                         },
-                        onRename: () =>
-                            onRename(context, provider, g.id, g.name, g.currency),
+                        onRename: () => onRename(
+                            context, provider, g.id, g.name, g.currency),
                         onDelete: () =>
                             onDelete(context, provider, g.id, g.name),
                       )),
@@ -228,8 +228,7 @@ class NusDrawer extends StatelessWidget {
                         );
                       }
                     },
-                    icon:
-                        const Icon(Icons.logout_rounded, size: 18),
+                    icon: const Icon(Icons.logout_rounded, size: 18),
                     label: Text(
                       'SIGN OUT',
                       style: TextStyle(
