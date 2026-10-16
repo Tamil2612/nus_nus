@@ -10,12 +10,11 @@ class Group {
   final String currency;
   final bool isPersonal;
 
-  /// Uid of the account that created this group. The creator manages
-  /// group metadata and membership. Expense details can be edited/deleted
-  /// by the expense logger or group owner, but only the original expense
-  /// logger can change per-person paid/pending flags. Either linked person
-  /// in a debtor-creditor pair can record an external settlement. These
-  /// permissions are enforced in the UI and Firestore/callable backend.
+  /// Uid of the account that created this group. The creator manages group
+  /// metadata and membership. Only the original expense logger can edit/delete
+  /// an unsettled expense or change manual paid/pending flags. Once any share
+  /// is settled, the expense is immutable. Only the creditor's linked account
+  /// can record an external pair settlement.
   final String ownerId;
 
   /// Display name of the owner, captured at creation time so every linked
