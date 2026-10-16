@@ -76,30 +76,20 @@ class FirestoreRepository {
     if (!snap.exists) await ref.set(group.toJson());
   }
 
-  /// Deletes the group's expenses first (the rules need the group document
-  /// to exist to authorise them), then the group itself.
+  /// Deletes a group and its nested records through a trusted callable.
   Future<void> deleteGroup(String groupId) async {
     try {
-      // Firestore does not cascade subcollection deletes. Remove both the
-      // financial records and chat messages before deleting the group itself.
-      final subcollections = [
-        _expensesCol(groupId),
-        _groups.doc(groupId).collection('messages'),
-      ];
-      for (final col in subcollections) {
-        while (true) {
-          final snap = await col.limit(400).get();
-          if (snap.docs.isEmpty) break;
-          final batch = FirebaseFirestore.instance.batch();
-          for (final d in snap.docs) {
-            batch.delete(d.reference);
-          }
-          await batch.commit();
-        }
+      if (FirebaseAuth.instance.currentUser == null) {
+        throw FirebaseFunctionsException(
+          code: 'unauthenticated',
+          message: 'Sign in again before deleting this group.',
+        );
       }
-      await _groups.doc(groupId).delete();
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('deleteGroup');
+      await callable.call({'groupId': groupId});
     } catch (e, st) {
-      debugPrint('FirestoreRepository.deleteGroup failed: $e\n$st');
+      debugPrint('FirestoreRepository.deleteGroup failed: $e\\n$st');
       rethrow;
     }
   }
