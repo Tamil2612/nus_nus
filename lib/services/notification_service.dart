@@ -126,6 +126,9 @@ class NotificationService {
         _publish(PushEventKind.opened, message);
       });
 
+      // Keep legacy FCM registration tokens until the server sender is migrated
+      // to Firebase Installation IDs; changing only the client breaks delivery.
+      // ignore: deprecated_member_use
       _refreshSub = _messaging.onTokenRefresh.listen(
         (newToken) {
           if (_activeUid != uid) return;
@@ -195,6 +198,7 @@ class NotificationService {
       }
 
 // Invalidate this device's current FCM token.
+      // ignore: deprecated_member_use
       await _messaging.deleteToken();
     } catch (error, stackTrace) {
       debugPrint('NotificationService.clear error: $error');
@@ -228,6 +232,7 @@ class NotificationService {
       }
     }
 
+    // ignore: deprecated_member_use
     return _messaging.getToken();
   }
 
