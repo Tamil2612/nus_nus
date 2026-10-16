@@ -295,17 +295,16 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       const people = Array.isArray(group.members) ? group.members : [];
       const fromPerson = people.find((p) => Number(p.id) === fromId);
       const toPerson = people.find((p) => Number(p.id) === toId);
-      if (!fromPerson || !toPerson ||
-          (fromPerson.linkedUserId !== context.auth.uid &&
-           toPerson.linkedUserId !== context.auth.uid)) {
+      if (!fromPerson || !toPerson || toPerson.linkedUserId !== context.auth.uid) {
         throw new functions.https.HttpsError(
           'permission-denied',
-          'Only one of the two people in this debt can confirm it.'
+          'Only the person owed money can record this settlement.'
         );
       }
 
       const expensesSnap = await tx.get(expensesRef);
-      const docs = expensesSnap.docs
+      const allDocs = expensesSnap.docs;
+      const docs = allDocs
         .filter((doc) => doc.data().isSettlement !== true)
         .sort((a, b) => {
           const at = a.data().createdAt && a.data().createdAt.toMillis
@@ -331,6 +330,21 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
 
       let forwardCents = 0;
       let reverseCents = 0;
+      // Legacy synthetic settlement expenses represent negative offsets.
+      // Include them in net validation so old records do not resurrect debts.
+      for (const doc of allDocs) {
+        const expense = doc.data();
+        if (expense.isSettlement !== true) continue;
+        const payerId = Number(expense.payerId);
+        const splits = expense.splitMap || {};
+        for (const [rawCreditorId, rawAmount] of Object.entries(splits)) {
+          const creditorId = Number(rawCreditorId);
+          const cents = Math.round(Number(rawAmount) * 100);
+          if (!Number.isFinite(cents) || cents <= 0) continue;
+          if (payerId === fromId && creditorId === toId) forwardCents -= cents;
+          if (payerId === toId && creditorId === fromId) reverseCents -= cents;
+        }
+      }
       for (const doc of docs) {
         const expense = doc.data();
         const payerId = Number(expense.payerId);
