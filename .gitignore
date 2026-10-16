@@ -39,14 +39,37 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# Android & Gradle build artifacts
+.gradle/
+/android/.gradle/
+/android/build/
+/android/app/build/
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/captures/
+
+# Firebase & Functions
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+/functions/node_modules/
+/functions/lib/
+
+# Generated Flutter Plugin Registrants
+/ios/Runner/GeneratedPluginRegistrant.h
+/ios/Runner/GeneratedPluginRegistrant.m
+/macos/Flutter/GeneratedPluginRegistrant.swift
+/windows/flutter/generated_plugin_registrant.cc
+/windows/flutter/generated_plugins.cmake
+/linux/flutter/generated_plugin_registrant.cc
+/linux/flutter/generated_plugins.cmake
 
 # Archives
 *.zip
 
 # Tooling output / local notes that should not be versioned
 .artifacts/
-.firebase/
+*.artifact.md

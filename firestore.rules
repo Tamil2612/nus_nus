@@ -40,6 +40,62 @@ service cloud.firestore {
 
       allow delete: if isGroupOwner();
 
+      // Group chat is readable only by current members.
+      match /messages/{messageId} {
+        function chatGroupData() {
+          return get(/databases/$(database)/documents/groups/$(groupId)).data;
+        }
+        function chatGroupMember() {
+          return request.auth != null &&
+            request.auth.uid in chatGroupData().memberUids;
+        }
+        function isGroupOwner() {
+          return request.auth != null &&
+            request.auth.uid == chatGroupData().ownerId;
+        }
+        function validImagePath(path) {
+          return path is string &&
+            path.size() <= 300 &&
+            path.matches('groups/' + groupId + '/chat/' + request.auth.uid + '/[^/]+\\.jpg');
+        }
+
+        allow read: if chatGroupMember();
+        allow create: if chatGroupMember() &&
+          request.resource.data.keys().hasOnly([
+            'senderUid', 'senderName', 'text', 'createdAt', 'imagePath'
+          ]) &&
+          request.resource.data.senderUid == request.auth.uid &&
+          request.resource.data.senderName is string &&
+          request.resource.data.senderName.size() > 0 &&
+          request.resource.data.senderName.size() <= 80 &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() <= 1000 &&
+          (request.resource.data.text.size() > 0 ||
+            ('imagePath' in request.resource.data &&
+             validImagePath(request.resource.data.imagePath))) &&
+          (!('imagePath' in request.resource.data) ||
+            validImagePath(request.resource.data.imagePath)) &&
+          request.resource.data.createdAt == request.time;
+
+        // Authors can edit text only; sender, timestamp and image are immutable.
+        // A text message may be edited once. The isEdited flag is permanent,
+        // and a second update is rejected even if the client bypasses the UI.
+        allow update: if chatGroupMember() &&
+          request.auth.uid == resource.data.senderUid &&
+          !resource.data.keys().hasAny(['imagePath', 'imageUrl']) &&
+          (!('isEdited' in resource.data) || resource.data.isEdited == false) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['text', 'isEdited']) &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 1000 &&
+          request.resource.data.text != resource.data.text &&
+          request.resource.data.isEdited == true;
+
+        allow delete: if chatGroupMember() &&
+          (request.auth.uid == resource.data.senderUid || isGroupOwner());
+      }
+
       match /expenses/{expenseId} {
         function groupData() {
           return get(/databases/$(database)/documents/groups/$(groupId)).data;

@@ -1,0 +1,32 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function groupData(groupId) {
+      return firestore.get(/databases/(default)/documents/groups/$(groupId)).data;
+    }
+    function isGroupMember(groupId) {
+      return signedIn() &&
+        request.auth.uid in groupData(groupId).memberUids;
+    }
+    function isGroupOwner(groupId) {
+      return signedIn() &&
+        request.auth.uid == groupData(groupId).ownerId;
+    }
+
+    match /groups/{groupId}/chat/{uid}/{fileName} {
+      allow read: if isGroupMember(groupId);
+      allow create: if isGroupMember(groupId) &&
+        request.auth.uid == uid &&
+        request.resource.size > 0 &&
+        request.resource.size <= 5 * 1024 * 1024 &&
+        request.resource.contentType == 'image/jpeg';
+      allow update: if false;
+      allow delete: if isGroupMember(groupId) &&
+        (request.auth.uid == uid || isGroupOwner(groupId));
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

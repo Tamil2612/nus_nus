@@ -9,9 +9,9 @@ import '../widgets/balances_tab.dart';
 import '../widgets/branded_loader.dart';
 import '../utils/currency_formatter.dart';
 import '../widgets/ledger_tab.dart';
-import '../widgets/expense_form_sheet.dart';
+import '../widgets/group_chat_tab.dart';
 import '../widgets/nus_drawer.dart';
-
+import '../widgets/expense_form_sheet.dart';
 import 'ai_expense_screen.dart';
 
 class GroupDetailScreen extends StatefulWidget {
@@ -29,7 +29,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       setState(() {});
     });
@@ -238,7 +238,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             style: const TextStyle(
                 color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: const Text(
-          'This permanently deletes the group along with all its members '
+          'This permanently deletes the group, chat, members, '
           'and expense history. This can\'t be undone.',
           style: TextStyle(color: AppColors.slate),
         ),
@@ -265,19 +265,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     }
   }
 
-  void _showAddExpenseSheet(BuildContext context) {
-    showExpenseFormSheet(context);
-  }
-
-  void _openNusAi(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const AiExpenseScreen(),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
@@ -290,6 +277,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
 
     return Scaffold(
       key: _scaffoldKey,
+      endDrawerEnableOpenDragGesture: false,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -335,6 +323,48 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         onDelete: _confirmDeleteGroup,
         onAddGroup: _showAddGroup,
       ),
+      floatingActionButton: _tabController.index == 0
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'group_detail_fab_ai',
+                  tooltip: 'Nus AI',
+                  backgroundColor: AppColors.brass,
+                  foregroundColor: AppColors.ink,
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AiExpenseScreen()),
+                    );
+                  },
+                  child: Image.asset(
+                    'assets/icon/ai.png',
+                    width: 18.w,
+                    height: 18.w,
+                    errorBuilder: (_, __, ___) =>
+                        const Icon(Icons.auto_awesome, size: 18),
+                  ),
+                ),
+                10.verticalSpace,
+                FloatingActionButton.extended(
+                  heroTag: 'group_detail_fab_add_split',
+                  tooltip: 'Add Split',
+                  backgroundColor: AppColors.brass,
+                  foregroundColor: AppColors.ink,
+                  onPressed: () => showExpenseFormSheet(context),
+                  icon: const Icon(Icons.add),
+                  label: Text(
+                    'Add Split',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13.sp),
+                  ),
+                ),
+              ],
+            ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: RadialGradient(
@@ -371,8 +401,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                           labelStyle: TextStyle(
                               fontSize: 12.5.sp, fontWeight: FontWeight.bold),
                           tabs: const [
-                            Tab(text: 'Activity'),
-                            Tab(text: 'Balances'),
+                            Tab(icon: Icon(Icons.chat_bubble_outline, size: 16), text: 'Chat'),
+                            Tab(icon: Icon(Icons.receipt_long_outlined, size: 16), text: 'Expenses'),
+                            Tab(icon: Icon(Icons.account_balance_wallet_outlined, size: 16), text: 'Balances'),
                           ],
                         ),
                       ),
@@ -381,6 +412,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                       child: TabBarView(
                         controller: _tabController,
                         children: [
+                          const GroupChatTab(),
                           LedgerTab(),
                           BalancesTab(),
                         ],
@@ -390,59 +422,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                 ),
         ),
       ),
-      floatingActionButton: currentGroup == null
-          ? null
-          : Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                SizedBox(
-                  height: 45.h,
-                  child: FloatingActionButton.extended(
-                    heroTag: null,
-                    onPressed: () => _openNusAi(context),
-                    backgroundColor: AppColors.brass,
-                    foregroundColor: AppColors.ink,
-                    elevation: 4,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
-                    icon: Image.asset(
-                      'assets/icon/ai.png',
-                      width: 18.w,
-                      height: 18.w,
-                    ),
-                    label: Text(
-                      'Nus Ai',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12.sp,
-                      ),
-                    ),
-                  ),
-                ),
-                12.verticalSpace,
-                SizedBox(
-                  height: 45.h,
-                  child: FloatingActionButton.extended(
-                    onPressed: () => _showAddExpenseSheet(context),
-                    heroTag: null,
-                    backgroundColor: AppColors.brass,
-                    foregroundColor: AppColors.ink,
-                    elevation: 4,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    extendedPadding: EdgeInsets.symmetric(horizontal: 12.w),
-                    icon: Icon(Icons.add, size: 18.sp),
-                    label: Text(
-                      'Add Split',
-                      style: TextStyle(
-                        fontSize: 12.sp,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
     );
   }
 }
