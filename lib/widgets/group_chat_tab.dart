@@ -177,7 +177,7 @@ class _GroupChatTabState extends State<GroupChatTab> {
       // Keep chat photos reasonably sharp without uploading original camera-sized files.
       maxWidth: 1600,
       maxHeight: 1600,
-      imageQuality: 88,
+      imageQuality: 80,
     );
 
     if (!mounted || pickedFile == null) return;
