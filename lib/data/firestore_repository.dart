@@ -89,7 +89,7 @@ class FirestoreRepository {
           .httpsCallable('deleteGroup');
       await callable.call({'groupId': groupId});
     } catch (e, st) {
-      debugPrint('FirestoreRepository.deleteGroup failed: $e\\n$st');
+      debugPrint('FirestoreRepository.deleteGroup failed: $e\n$st');
       rethrow;
     }
   }
