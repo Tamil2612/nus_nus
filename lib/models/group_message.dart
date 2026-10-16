@@ -6,6 +6,9 @@ class GroupMessage {
   final String senderUid;
   final String senderName;
   final String text;
+  /// Firebase Storage path for new private group images.
+  final String? imagePath;
+  /// Legacy field retained for previously stored image messages.
   final String? imageUrl;
   final DateTime? createdAt;
   final bool isEdited;
@@ -15,6 +18,7 @@ class GroupMessage {
     required this.senderUid,
     required this.senderName,
     required this.text,
+    this.imagePath,
     this.imageUrl,
     this.createdAt,
     this.isEdited = false,
@@ -34,8 +38,9 @@ class GroupMessage {
       senderUid: json['senderUid'] as String? ?? '',
       senderName: json['senderName'] as String? ?? 'Member',
       text: json['text'] as String? ?? '',
+      imagePath: json['imagePath'] as String?,
       imageUrl: json['imageUrl'] as String?,
-      createdAt: createdAt,
+      createdAt: createdAt ?? DateTime.now(),
       isEdited: json['isEdited'] as bool? ?? false,
     );
   }
