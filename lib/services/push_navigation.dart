@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../models/expense.dart';
 import '../providers/split_provider.dart';
 import '../screens/expense_detail_screen.dart';
+import '../screens/group_detail_screen.dart';
 import '../theme/app_colors.dart';
 import 'notification_service.dart';
 
@@ -43,7 +44,9 @@ void _showForegroundBanner(PushEvent event) {
   final body = event.body ?? '';
   if (title.isEmpty && body.isEmpty) return;
 
-  final opensExpense = event.data['type'] == 'expense_created';
+  final notificationType = event.data['type'];
+  final opensExpense = notificationType == 'expense_created';
+  final opensGroupChat = notificationType == 'group_message';
   messenger
     ..hideCurrentSnackBar()
     ..showSnackBar(
@@ -67,7 +70,7 @@ void _showForegroundBanner(PushEvent event) {
               Text(body, style: const TextStyle(color: AppColors.paper)),
           ],
         ),
-        action: opensExpense
+        action: (opensExpense || opensGroupChat)
             ? SnackBarAction(
                 label: 'VIEW',
                 textColor: AppColors.brass,
@@ -86,11 +89,12 @@ int _openGeneration = 0;
 /// expenses have loaded, so this waits (up to ~20s) for the expense to show
 /// up instead of giving up immediately.
 Future<void> _openFromPush(Map<String, String> data) async {
-  if (data['type'] != 'expense_created') return;
+  final notificationType = data['type'];
+  if (notificationType != 'expense_created' && notificationType != 'group_message') return;
   final groupId = data['groupId'];
   final expenseId = data['expenseId'];
   if (groupId == null || groupId.isEmpty) return;
-  if (expenseId == null || expenseId.isEmpty) return;
+  if (notificationType == 'expense_created' && (expenseId == null || expenseId.isEmpty)) return;
 
   final generation = ++_openGeneration;
   for (var attempt = 0; attempt < 50; attempt++) {
@@ -98,21 +102,28 @@ Future<void> _openFromPush(Map<String, String> data) async {
     final context = appNavigatorKey.currentContext;
     if (context != null) {
       final provider = Provider.of<SplitProvider>(context, listen: false);
-      final expense = _findExpense(provider, groupId, expenseId);
-      if (expense != null) {
+      final groupExists = provider.groups.any((group) => group.id == groupId);
+      if (groupExists) {
         provider.selectGroup(groupId);
-        appNavigatorKey.currentState?.push(
-          MaterialPageRoute<void>(
-            builder: (_) => ExpenseDetailScreen(expense: expense),
-          ),
-        );
-        return;
+        if (notificationType == 'group_message') {
+          appNavigatorKey.currentState?.push(
+            MaterialPageRoute<void>(builder: (_) => const GroupDetailScreen()),
+          );
+          return;
+        }
+        final expense = _findExpense(provider, groupId, expenseId ?? '');
+        if (expense != null) {
+          appNavigatorKey.currentState?.push(
+            MaterialPageRoute<void>(builder: (_) => ExpenseDetailScreen(expense: expense)),
+          );
+          return;
+        }
       }
     }
     await Future<void>.delayed(const Duration(milliseconds: 400));
   }
-  debugPrint('Push: expense $expenseId in group $groupId never became '
-      'available (signed out, or no longer a member?).');
+  debugPrint('Push target in group $groupId never became available '
+      '(signed out, or no longer a member?).');
 }
 
 Expense? _findExpense(SplitProvider provider, String groupId, String expenseId) {
