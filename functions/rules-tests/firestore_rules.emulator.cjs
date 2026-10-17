@@ -154,7 +154,7 @@ function expenseRef(context, id = 'e1') {
   return doc(context.firestore(), 'groups/g1/expenses', id);
 }
 
-async function seedExpense() {
+async function seedExpense(settledAmounts = {}) {
   await env.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), 'groups/g1/expenses/e1'), {
       desc: 'Dinner',
@@ -163,7 +163,7 @@ async function seedExpense() {
       splitMap: { '1': 50, '2': 50 },
       isSettlement: false,
       settledBy: ['1'],
-      settledAmounts: {},
+      settledAmounts,
       addedBy: 'member-a',
       createdAt: new Date('2026-10-16T10:00:00Z'),
     });
@@ -182,12 +182,26 @@ test('only the expense author can toggle a participant paid/pending', async () =
 });
 
 test('expense author cannot forge or erase trusted pair-settlement allocations', async () => {
-  await seedExpense();
   const author = env.authenticatedContext('member-a');
+  await seedExpense();
   await assertFails(updateDoc(expenseRef(author), { settledAmounts: { '2': 25 } }));
-  await assertFails(updateDoc(expenseRef(author), { settledAmounts: {} , splitMap: { '1': 50, '2': 50 } }));
+
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'groups/g1/expenses/e2'), {
+      desc: 'Partially settled dinner',
+      amount: 100,
+      payerId: 1,
+      splitMap: { '1': 50, '2': 50 },
+      isSettlement: false,
+      settledBy: ['1'],
+      settledAmounts: { '2': 25 },
+      addedBy: 'member-a',
+      createdAt: new Date('2026-10-16T10:00:00Z'),
+    });
+  });
+  await assertFails(updateDoc(expenseRef(author, 'e2'), { settledAmounts: {}, amount: 90 }));
   // A description-only edit is still permitted without touching settlement data.
-  await assertSucceeds(updateDoc(expenseRef(author), { desc: 'Dinner updated' }));
+  await assertSucceeds(updateDoc(expenseRef(author, 'e2'), { desc: 'Dinner updated' }));
 });
 
 test('chat image Storage is private, size-limited, and member-only', async () => {
