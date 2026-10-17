@@ -11,10 +11,10 @@ import '../models/transfer.dart';
 ///   Expenses  →  LedgerEntry list  →  PairBalance list  →  net balances  →  optimized Settlement
 ///
 /// Every stage is a pure function of the one before it — nothing here is
-/// stored. Editing or deleting an expense just changes the input list and
-/// the whole pipeline recomputes; past expenses are never mutated to
-/// "absorb" a settlement, which is what keeps the debtor-creditor history
-/// (item 3 of the spec) honest.
+/// stored. Editing or deleting an expense changes the input list and the
+/// pipeline recomputes. A recorded pair settlement may update only the
+/// expense's settlement-allocation metadata; its original amount, payer and
+/// split remain intact, and no synthetic payment expense is created.
 class SettlementCalculator {
   SettlementCalculator._();
 
@@ -36,7 +36,22 @@ class SettlementCalculator {
   static List<LedgerEntry> deriveLedgerEntries(List<Expense> expenses) {
     final entries = <LedgerEntry>[];
     for (final e in expenses) {
-      if (e.isSettlement) continue; // Ignore legacy settlement cards; settlements are tracked via settledBy on split expenses.
+      if (e.isSettlement) {
+        // Older app versions recorded settlements as their own expense-shaped
+        // documents: payerId is the debtor and splitMap holds creditor -> amount.
+        // Keep those historical payments in the ledger as negative debt entries.
+        e.splitMap.forEach((creditorId, amount) {
+          if (creditorId == e.payerId || amount <= 0.005) return;
+          entries.add(LedgerEntry(
+            expenseId: e.id,
+            fromId: e.payerId,
+            toId: creditorId,
+            amount: -amount,
+            isSettlement: true,
+          ));
+        });
+        continue;
+      }
       e.splitMap.forEach((personId, share) {
         if (personId == e.payerId) return; // payer never owes themselves
         // Whole-share flags remain supported for older records. Pairwise

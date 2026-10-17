@@ -2,6 +2,11 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { sendExpenseNotifications } = require('./notifications');
+const {
+  groupAllocationsByExpense,
+  subtractAllocations,
+  canRevert,
+} = require('./settlement_log');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -353,9 +358,9 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       const people = Array.isArray(group.members) ? group.members : [];
       const fromPerson = people.find((p) => Number(p.id) === fromId);
       const toPerson = people.find((p) => Number(p.id) === toId);
-      if (!fromPerson || !toPerson ||
-          (fromPerson.linkedUserId !== context.auth.uid &&
-           toPerson.linkedUserId !== context.auth.uid)) {
+      const fromIsMe = !!fromPerson && fromPerson.linkedUserId === context.auth.uid;
+      const toIsMe = !!toPerson && toPerson.linkedUserId === context.auth.uid;
+      if (!fromPerson || !toPerson || fromIsMe === toIsMe) {
         throw new functions.https.HttpsError(
           'permission-denied',
           'Only one of the two people in this debt can confirm it.'
@@ -363,15 +368,16 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       }
 
       const expensesSnap = await tx.get(expensesRef);
-      const docs = expensesSnap.docs
-        .filter((doc) => doc.data().isSettlement !== true)
-        .sort((a, b) => {
-          const at = a.data().createdAt && a.data().createdAt.toMillis
-            ? a.data().createdAt.toMillis() : 0;
-          const bt = b.data().createdAt && b.data().createdAt.toMillis
-            ? b.data().createdAt.toMillis() : 0;
-          return at - bt || a.id.localeCompare(b.id);
-        });
+      const docs = expensesSnap.docs.slice().sort((a, b) => {
+        const at = a.data().createdAt && a.data().createdAt.toMillis
+          ? a.data().createdAt.toMillis() : 0;
+        const bt = b.data().createdAt && b.data().createdAt.toMillis
+          ? b.data().createdAt.toMillis() : 0;
+        return at - bt || a.id.localeCompare(b.id);
+      });
+      // Legacy settlement cards remain part of the ledger but must never be
+      // mutated by the new allocator, which only reconciles real expense shares.
+      const expenseDocs = docs.filter((doc) => doc.data().isSettlement !== true);
 
       const outstandingFor = (expense, personId) => {
         const splits = expense.splitMap || {};
@@ -389,13 +395,33 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
 
       let forwardCents = 0;
       let reverseCents = 0;
-      for (const doc of docs) {
+      let legacyForwardCents = 0;
+      let legacyReverseCents = 0;
+      for (const doc of expenseDocs) {
         const expense = doc.data();
         const payerId = Number(expense.payerId);
         if (payerId === toId) forwardCents += outstandingFor(expense, fromId);
         if (payerId === fromId) reverseCents += outstandingFor(expense, toId);
       }
-      const netCents = forwardCents - reverseCents;
+      // Old releases wrote settlement cards as negative ledger entries. Count
+      // them when validating the current net, but do not allocate against them.
+      for (const doc of docs) {
+        const settlement = doc.data();
+        if (settlement.isSettlement !== true) continue;
+        const payerId = Number(settlement.payerId);
+        const splits = settlement.splitMap || {};
+        if (payerId === fromId) {
+          legacyForwardCents += Math.round(Number(splits[String(toId)] ?? splits[toId] ?? 0) * 100);
+        }
+        if (payerId === toId) {
+          legacyReverseCents += Math.round(Number(splits[String(fromId)] ?? splits[fromId] ?? 0) * 100);
+        }
+      }
+      const netCents = forwardCents - reverseCents - legacyForwardCents + legacyReverseCents;
+      if (legacyReverseCents > reverseCents) {
+        throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely. Please review the affected group.');
+      }
+      const reverseAllocationCents = reverseCents - legacyReverseCents;
       if (netCents <= 0) {
         throw new functions.https.HttpsError(
           'failed-precondition',
@@ -413,9 +439,16 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // then a net settlement of 60 reconciles B's full 100 share and A's
       // 40 share, while only 60 represents the external amount paid.
       const writesByPath = new Map();
+      const allocations = [];
       const allocate = (payerId, debtorId, centsToAllocate) => {
+        if (!Number.isSafeInteger(centsToAllocate) || centsToAllocate < 0) {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'Legacy settlement history cannot be reconciled safely. Please review the affected group.'
+          );
+        }
         let remaining = centsToAllocate;
-        for (const doc of docs) {
+        for (const doc of expenseDocs) {
           if (remaining <= 0) break;
           const expense = doc.data();
           if (Number(expense.payerId) !== payerId) continue;
@@ -430,6 +463,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
           const previousCents = Math.round(Number(rawAmounts[String(debtorId)] || 0) * 100);
           nextAmounts[String(debtorId)] = (previousCents + applyCents) / 100;
           writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          allocations.push({ expenseId: doc.id, personId: debtorId, cents: applyCents });
           remaining -= applyCents;
         }
         if (remaining > 0) {
@@ -443,17 +477,349 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // Reconcile all reverse-direction debt as an offset, then apply the
       // user's actual settlement amount to the forward debt. This preserves
       // the net balance after partial settlements and avoids fake payments.
-      allocate(fromId, toId, reverseCents);
-      allocate(toId, fromId, reverseCents + requestedCents);
+      allocate(fromId, toId, reverseAllocationCents);
+      allocate(toId, fromId, reverseAllocationCents + requestedCents);
       const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
       }
+
+      const logRef = groupRef.collection('settlements').doc();
+      tx.set(logRef, {
+        batchId: logRef.id,
+        groupIds: [groupId],
+        groupId,
+        fromId,
+        toId,
+        amountCents: requestedCents,
+        offsetCents: reverseAllocationCents,
+        currency: String(group.currency || 'AED').toUpperCase(),
+        recordedBy: context.auth.uid,
+        participantUids: [fromPerson.linkedUserId, toPerson.linkedUserId].filter(Boolean),
+        allocations,
+        status: 'active',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
     return { success: true };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
     console.error('recordPairSettlement failed:', error);
     throw new functions.https.HttpsError('internal', 'Could not record settlement. Refresh and try again.');
+  }
+});
+
+
+// Atomically settles one person's combined net balance with another across
+// several groups in the same currency. Opposing debts are reconciled first;
+// only the net amount is treated as paid outside Nus·Nus.
+exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to record a settlement.');
+  }
+
+  const amount = Number(data.amount);
+  const groupsInput = data.groups;
+  if (!Number.isFinite(amount) || amount < 0 || amount > 100000000 ||
+      !Array.isArray(groupsInput) || groupsInput.length < 1 || groupsInput.length > 50) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid cross-group settlement details.');
+  }
+  const requestedCents = Math.round(amount * 100);
+  if (Math.abs(requestedCents / 100 - amount) > 0.005) {
+    throw new functions.https.HttpsError('invalid-argument', 'Settlement must be in whole cents.');
+  }
+
+  const normalizedGroups = [];
+  const seenGroupIds = new Set();
+  for (const item of groupsInput) {
+    const groupId = item && typeof item.groupId === 'string' ? item.groupId.trim() : '';
+    const fromId = Number(item && item.fromId);
+    const toId = Number(item && item.toId);
+    if (!groupId || !Number.isSafeInteger(fromId) || !Number.isSafeInteger(toId) ||
+        fromId === toId || seenGroupIds.has(groupId)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid group or participant in settlement.');
+    }
+    seenGroupIds.add(groupId);
+    normalizedGroups.push({ groupId, fromId, toId });
+  }
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const snapshots = [];
+      // All reads are completed before any writes, as required by Firestore transactions.
+      for (const item of normalizedGroups) {
+        const groupRef = db.collection('groups').doc(item.groupId);
+        const groupSnap = await tx.get(groupRef);
+        if (!groupSnap.exists) {
+          throw new functions.https.HttpsError('not-found', 'A group in this settlement no longer exists.');
+        }
+        const group = groupSnap.data();
+        const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
+        if (!memberUids.includes(context.auth.uid)) {
+          throw new functions.https.HttpsError('permission-denied', 'You are not a member of every group in this settlement.');
+        }
+        const people = Array.isArray(group.members) ? group.members : [];
+        const fromPerson = people.find((p) => Number(p.id) === item.fromId);
+        const toPerson = people.find((p) => Number(p.id) === item.toId);
+        const fromIsMe = !!fromPerson && fromPerson.linkedUserId === context.auth.uid;
+        const toIsMe = !!toPerson && toPerson.linkedUserId === context.auth.uid;
+        if (!fromPerson || !toPerson || fromIsMe === toIsMe) {
+          throw new functions.https.HttpsError('permission-denied', 'The authenticated user must be exactly one side of each pair.');
+        }
+        const counterpart = fromIsMe ? toPerson : fromPerson;
+        const counterpartKey = counterpart.linkedUserId
+          ? 'uid:' + counterpart.linkedUserId
+          : 'name:' + String(counterpart.name || '').trim().toLowerCase();
+        const expensesRef = groupRef.collection('expenses');
+        const expensesSnap = await tx.get(expensesRef);
+        const docs = expensesSnap.docs.slice().sort((a, b) => {
+          const at = a.data().createdAt && a.data().createdAt.toMillis ? a.data().createdAt.toMillis() : 0;
+          const bt = b.data().createdAt && b.data().createdAt.toMillis ? b.data().createdAt.toMillis() : 0;
+          return at - bt || a.id.localeCompare(b.id);
+        });
+        snapshots.push({ ...item, group, docs, expenseDocs: docs.filter((doc) => doc.data().isSettlement !== true), counterpartKey, fromIsMe, fromPerson, toPerson, allocations: [] });
+      }
+      const expectedCounterpart = snapshots[0].counterpartKey;
+      const expectedDirection = snapshots[0].fromIsMe;
+      if (snapshots.some((item) => item.counterpartKey !== expectedCounterpart || item.fromIsMe !== expectedDirection)) {
+        throw new functions.https.HttpsError('invalid-argument', 'All groups must refer to the same person and settlement direction.');
+      }
+
+      const outstandingFor = (expense, personId) => {
+        const splits = expense.splitMap || {};
+        const share = Number(splits[String(personId)] ?? splits[personId] ?? 0);
+        if (!Number.isFinite(share) || share <= 0) return 0;
+        const rawSettled = expense.settledBy;
+        const settled = Array.isArray(rawSettled)
+          ? rawSettled.map(String).includes(String(personId))
+          : !!(rawSettled && rawSettled[String(personId)] === true);
+        if (settled) return 0;
+        const rawAmounts = expense.settledAmounts || {};
+        const already = Number(rawAmounts[String(personId)] ?? 0);
+        return Math.max(0, Math.round((share - already) * 100));
+      };
+
+      const currencySet = new Set(snapshots.map((item) => String(item.group.currency || 'AED').toUpperCase()));
+      if (currencySet.size !== 1) {
+        throw new functions.https.HttpsError('invalid-argument', 'Only groups using the same currency can be settled together.');
+      }
+
+      let forwardCents = 0;
+      let reverseCents = 0;
+      let legacyForwardCents = 0;
+      let legacyReverseCents = 0;
+      for (const item of snapshots) {
+        for (const doc of item.expenseDocs) {
+          const expense = doc.data();
+          const payerId = Number(expense.payerId);
+          if (payerId === item.toId) forwardCents += outstandingFor(expense, item.fromId);
+          if (payerId === item.fromId) reverseCents += outstandingFor(expense, item.toId);
+        }
+        for (const doc of item.docs) {
+          const settlement = doc.data();
+          if (settlement.isSettlement !== true) continue;
+          const payerId = Number(settlement.payerId);
+          const splits = settlement.splitMap || {};
+          if (payerId === item.fromId) {
+            legacyForwardCents += Math.round(Number(splits[String(item.toId)] ?? splits[item.toId] ?? 0) * 100);
+          }
+          if (payerId === item.toId) {
+            legacyReverseCents += Math.round(Number(splits[String(item.fromId)] ?? splits[item.fromId] ?? 0) * 100);
+          }
+        }
+      }
+
+      const netCents = forwardCents - reverseCents - legacyForwardCents + legacyReverseCents;
+      if (legacyReverseCents > reverseCents) {
+        throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely. Please review the affected groups.');
+      }
+      const reverseAllocationCents = reverseCents - legacyReverseCents;
+      if (netCents < 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'The debt direction changed. Refresh balances and try again.');
+      }
+      if (requestedCents === 0 && netCents !== 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'A zero-amount settlement is only valid when opposite debts cancel out.');
+      }
+      if (requestedCents > netCents) {
+        throw new functions.https.HttpsError('failed-precondition', 'Settlement amount exceeds the current combined net balance.');
+      }
+
+      const writesByPath = new Map();
+      // Reconcile opposite debts across all included groups first, then the
+      // requested net amount. The direction IDs are consistent per group.
+      // Allocate reverse shares per group; this callback keeps IDs group-local.
+      let reverseRemaining = reverseAllocationCents;
+      for (const item of snapshots) {
+        for (const doc of item.expenseDocs) {
+          if (reverseRemaining <= 0) break;
+          const expense = doc.data();
+          if (Number(expense.payerId) !== item.fromId) continue;
+          const shareCents = outstandingFor(expense, item.toId);
+          if (shareCents <= 0) continue;
+          const applyCents = Math.min(reverseRemaining, shareCents);
+          const priorWrite = writesByPath.get(doc.ref.path);
+          const rawAmounts = priorWrite ? priorWrite.settledAmounts : (expense.settledAmounts || {});
+          const nextAmounts = { ...rawAmounts };
+          const previousCents = Math.round(Number(rawAmounts[String(item.toId)] || 0) * 100);
+          nextAmounts[String(item.toId)] = (previousCents + applyCents) / 100;
+          writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          item.allocations.push({ expenseId: doc.id, personId: item.toId, cents: applyCents });
+          reverseRemaining -= applyCents;
+        }
+      }
+      if (reverseRemaining > 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'Could not reconcile all opposing debts safely.');
+      }
+
+      const forwardTarget = reverseAllocationCents + requestedCents;
+      if (forwardTarget < 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely.');
+      }
+      let forwardRemaining = forwardTarget;
+      for (const item of snapshots) {
+        for (const doc of item.expenseDocs) {
+          if (forwardRemaining <= 0) break;
+          const expense = doc.data();
+          if (Number(expense.payerId) !== item.toId) continue;
+          const shareCents = outstandingFor(expense, item.fromId);
+          if (shareCents <= 0) continue;
+          const applyCents = Math.min(forwardRemaining, shareCents);
+          const priorWrite = writesByPath.get(doc.ref.path);
+          const rawAmounts = priorWrite ? priorWrite.settledAmounts : (expense.settledAmounts || {});
+          const nextAmounts = { ...rawAmounts };
+          const previousCents = Math.round(Number(rawAmounts[String(item.fromId)] || 0) * 100);
+          nextAmounts[String(item.fromId)] = (previousCents + applyCents) / 100;
+          writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          item.allocations.push({ expenseId: doc.id, personId: item.fromId, cents: applyCents });
+          forwardRemaining -= applyCents;
+        }
+      }
+      if (forwardRemaining > 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'Could not allocate the full net settlement safely.');
+      }
+
+      for (const write of writesByPath.values()) {
+        tx.update(write.ref, { settledAmounts: write.settledAmounts });
+      }
+
+      // One audit-log entry per group, tied together by a shared batchId so
+      // the whole cross-group settlement can be undone in one step.
+      const batchId = db.collection('groups').doc().id;
+      const batchGroupIds = snapshots.map((item) => item.groupId);
+      for (const item of snapshots) {
+        const logRef = db.collection('groups').doc(item.groupId).collection('settlements').doc();
+        tx.set(logRef, {
+          batchId,
+          groupIds: batchGroupIds,
+          groupId: item.groupId,
+          fromId: item.fromId,
+          toId: item.toId,
+          amountCents: requestedCents,
+          offsetCents: reverseAllocationCents,
+          currency: [...currencySet][0],
+          recordedBy: context.auth.uid,
+          participantUids: [item.fromPerson.linkedUserId, item.toPerson.linkedUserId].filter(Boolean),
+          allocations: item.allocations,
+          status: 'active',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('recordCrossGroupPairSettlement failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not record cross-group settlement. Refresh and try again.');
+  }
+});
+
+
+// Undoes a recorded settlement (and every other group's part of the same
+// cross-group batch) by subtracting exactly what it allocated. Either person
+// in the pair may undo, which gives a creditor a way to dispute a payment the
+// debtor recorded. The log entry is kept, marked 'reverted'.
+exports.revertSettlement = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to undo a settlement.');
+  }
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  const settlementId = typeof data.settlementId === 'string' ? data.settlementId.trim() : '';
+  if (!groupId || !settlementId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid settlement reference.');
+  }
+  const uid = context.auth.uid;
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const requestedRef = db.collection('groups').doc(groupId).collection('settlements').doc(settlementId);
+      const requestedSnap = await tx.get(requestedRef);
+      if (!requestedSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Settlement not found.');
+      }
+      const requested = requestedSnap.data();
+      if (requested.status !== 'active') {
+        throw new functions.https.HttpsError('failed-precondition', 'This settlement was already undone.');
+      }
+      if (!canRevert(requested, uid)) {
+        throw new functions.https.HttpsError('permission-denied', 'Only the two people in this settlement can undo it.');
+      }
+
+      const batchGroupIds = Array.isArray(requested.groupIds) && requested.groupIds.length > 0
+        ? requested.groupIds : [groupId];
+      const logs = [];
+      for (const gid of batchGroupIds) {
+        const groupRef = db.collection('groups').doc(gid);
+        const groupSnap = await tx.get(groupRef);
+        if (!groupSnap.exists) {
+          throw new functions.https.HttpsError('failed-precondition', 'A group in this settlement no longer exists.');
+        }
+        const memberUids = groupSnap.data().memberUids || [];
+        if (!memberUids.includes(uid)) {
+          throw new functions.https.HttpsError('permission-denied', 'You are not a member of every group in this settlement.');
+        }
+        const logSnap = await tx.get(groupRef.collection('settlements').where('batchId', '==', requested.batchId));
+        for (const doc of logSnap.docs) {
+          if (doc.data().status === 'active') logs.push({ gid, ref: doc.ref, data: doc.data() });
+        }
+      }
+
+      const plans = [];
+      for (const log of logs) {
+        if (!canRevert(log.data, uid)) {
+          throw new functions.https.HttpsError('permission-denied', 'Only the two people in every settlement batch can undo it.');
+        }
+        const byExpense = groupAllocationsByExpense(log.data.allocations);
+        for (const [expenseId, centsByPerson] of Object.entries(byExpense)) {
+          const expenseRef = db.collection('groups').doc(log.gid).collection('expenses').doc(expenseId);
+          const expenseSnap = await tx.get(expenseRef);
+          if (!expenseSnap.exists) {
+            throw new functions.https.HttpsError('failed-precondition', 'An expense covered by this settlement no longer exists.');
+          }
+          const result = subtractAllocations(expenseSnap.data().settledAmounts, centsByPerson);
+          if (!result.ok) {
+            throw new functions.https.HttpsError('failed-precondition', 'This settlement can no longer be undone because the expenses changed. Contact support.');
+          }
+          plans.push({ ref: expenseRef, next: result.next });
+        }
+      }
+      if (logs.length === 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'No active settlement entries remain in this batch.');
+      }
+      for (const plan of plans) {
+        tx.update(plan.ref, { settledAmounts: plan.next });
+      }
+      for (const log of logs) {
+        tx.update(log.ref, {
+          status: 'reverted',
+          revertedBy: uid,
+          revertedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('revertSettlement failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not undo the settlement. Refresh and try again.');
   }
 });

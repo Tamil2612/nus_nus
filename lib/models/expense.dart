@@ -53,6 +53,16 @@ class Expense {
     return (share - (settledAmounts[personId] ?? 0)).abs() <= 0.005;
   }
 
+  /// True once a trusted pair settlement has covered this person's full
+  /// original share. Fully covered shares are locked against manual toggles;
+  /// partial shares may still be marked paid by the expense creator to forgive
+  /// the remainder.
+  bool isShareCoveredByPairSettlement(int personId) {
+    final share = splitMap[personId];
+    return share != null &&
+        (settledAmounts[personId] ?? 0) >= share - 0.005;
+  }
+
   /// Amount of [personId]'s share that remains outstanding.
   double remainingShare(int personId) {
     if (isSettlement || personId == payerId || settledBy.contains(personId)) {

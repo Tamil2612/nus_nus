@@ -270,6 +270,39 @@ void main() {
       expect(SettlementCalculator.computePairBalances(entries), isEmpty);
     });
 
+    test('legacy settlement records reduce the matching outstanding debt', () {
+      final expenses = [
+        Expense(
+          id: 'e-original',
+          desc: 'Original expense',
+          amount: 100,
+          payerId: 1,
+          splitMap: {2: 100},
+        ),
+        Expense(
+          id: 'e-legacy-settlement',
+          desc: 'Settlement',
+          amount: 30,
+          payerId: 2,
+          splitMap: {1: 30},
+          isSettlement: true,
+        ),
+      ];
+
+      final entries = SettlementCalculator.deriveLedgerEntries(expenses);
+      expect(entries.length, 2);
+      expect(entries.last.isSettlement, isTrue);
+      expect(entries.last.fromId, 2);
+      expect(entries.last.toId, 1);
+      expect(entries.last.amount, closeTo(-30, 0.01));
+
+      final balances = SettlementCalculator.computePairBalances(entries);
+      expect(balances.length, 1);
+      expect(balances.single.debtorId, 2);
+      expect(balances.single.creditorId, 1);
+      expect(balances.single.owedAmount, closeTo(70, 0.01));
+    });
+
     test('settling one participant does not clear another participant share', () {
       final expenses = [
         Expense(

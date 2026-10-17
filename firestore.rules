@@ -143,9 +143,13 @@ service cloud.firestore {
             request.resource.data.createdAt == resource.data.createdAt &&
             (request.auth.uid == resource.data.addedBy ||
               request.resource.data.settledBy == resource.data.settledBy) &&
-            (request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) ||
-              (request.auth.uid == resource.data.addedBy &&
-                request.resource.data.diff(resource.data).affectedKeys().hasAny(['splitMap', 'amount']))) &&
+            // Only the trusted callable may change pair-settlement allocations.
+            // Expense authors must not be able to erase or forge recorded settlements.
+            request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) &&
+            // Once any pair settlement has been allocated, changing the share
+            // amounts would invalidate that trusted reconciliation.
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['splitMap', 'amount']) ||
+              resource.data.get('settledAmounts', {}).size() == 0) &&
             request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
             request.resource.data.amount <= 100000000 &&
@@ -167,9 +171,18 @@ service cloud.firestore {
           )
         );
 
-        // Only the original expense logger may delete an expense.
+        // Only the original expense logger may delete an expense, and only
+        // after all pair-settlement allocations against it have been undone.
         allow delete: if isGroupMember() &&
-          request.auth.uid == resource.data.addedBy;
+          request.auth.uid == resource.data.addedBy &&
+          resource.data.get('settledAmounts', {}).size() == 0;
+      }
+
+      // Settlement audit entries are written only by trusted Admin SDK callables.
+      match /settlements/{settlementId} {
+        allow read: if signedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+        allow write: if false;
       }
     }
   }

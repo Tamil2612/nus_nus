@@ -188,16 +188,12 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
     final entry = widget.entry;
     final provider = context.watch<SplitProvider>();
     
-    // Check if user has permission to settle ANY of the groups in this breakdown.
-    // Permission: Only the group owner OR the person being paid (creditor) can confirm.
-    final canSettleAtLeastOne = entry.breakdown.any((contrib) {
-      if (contrib.amount.abs() <= 0.005) return false;
-      
-      final isOwner = provider.groups.any((g) => g.id == contrib.groupId && g.ownerId == provider.uid);
-      final isCreditor = contrib.amount > 0; // In OverallBalance context, positive = they owe you.
-      
-      return isOwner || isCreditor;
-    });
+    // The signed-in user is one side of this pair. Either debtor or creditor
+    // may record the external settlement; the callable independently verifies
+    // that the authenticated account is linked to one of the two people.
+    final canSettleAtLeastOne = entry.breakdown.any(
+      (contrib) => contrib.amount.abs() > 0.005,
+    );
 
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),

@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import 'common_atoms.dart';
 import 'app_loading_overlay.dart';
+import 'settlement_history_sheet.dart';
 
 class BalancesTab extends StatelessWidget {
   const BalancesTab({super.key});
@@ -113,6 +114,18 @@ class BalancesTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () => SettlementHistorySheet.show(context),
+                    icon: Icon(Icons.history, size: 16.sp, color: AppColors.slate),
+                    label: Text('Settlement history',
+                        style: TextStyle(
+                            fontSize: 12.sp,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.slate)),
+                  ),
+                ),
                 // Summary Card (Image 1 style)
                 Container(
                   padding: EdgeInsets.all(24.w),

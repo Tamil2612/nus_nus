@@ -595,19 +595,14 @@ class SplitProvider extends ChangeNotifier {
     return null;
   }
 
-  /// Settles up between [fromId] and [toId] in [groupId] (defaults to the
-  /// currently open group) by marking their open shares as paid on the
-  /// individual expenses — no separate settlement record is created, so the
-  /// activity feed stays clean and every expense's PAID/PENDING status
-  /// stays the single source of truth.
+  /// Records an external settlement between [fromId] and [toId] in [groupId]
+  /// (defaults to the currently open group). The trusted callable validates
+  /// the latest net balance and updates settlement-allocation metadata on the
+  /// existing expense shares; it does not move money or create a payment card.
   ///
-  /// Both directions between the pair are cleared (shares [fromId] owes on
-  /// expenses [toId] paid, and vice versa) because the Balances tab shows
-  /// the *net* of the two; clearing only one side would flip the balance
-  /// instead of zeroing it. [amount] is only validated — the amount to pay
-  /// is whatever the Balances tab showed for the pair.
-  ///
-  /// This is the single place that validates pairwise settlement requests.
+  /// Opposing debts are reconciled first, then [amount] is allocated against
+  /// the remaining debt direction. This preserves the pair's net balance for
+  /// partial settlements and keeps original expense amounts and splits intact.
   /// Either linked participant in the debtor-creditor pair may confirm; the
   /// callable revalidates the balance and atomically records the allocation.
   Future<String?> settleUp(int fromId, int toId, double amount, {String? groupId}) async {
@@ -659,22 +654,29 @@ class SplitProvider extends ChangeNotifier {
     }
   }
 
-  /// deleting an expense someone else logged (or your own) is a destructive
-  /// action, so it's kept restricted to whoever originally added it or the payer.
-  void removeExpense(String id) {
+  /// Deletes an expense. Returns an error message if it can't be deleted.
+  /// Expenses with recorded pair-settlement allocations must be undone first,
+  /// otherwise removing the source share would leave the other side short.
+  String? removeExpense(String id) {
     final group = currentGroup;
-    if (group == null) return;
+    if (group == null) return 'Select a group first.';
 
     final existingIndex = expenses.indexWhere((e) => e.id == id);
-    if (existingIndex == -1) return;
+    if (existingIndex == -1) return 'That expense no longer exists.';
 
     final expense = expenses[existingIndex];
-    if (expense.addedBy != _uid) return; // only the expense creator may delete
+    if (expense.addedBy != _uid) {
+      return 'Only the person who logged this expense can delete it.';
+    }
+    if (expense.settledAmounts.values.any((value) => value > 0.005)) {
+      return 'This expense is part of a recorded settlement. Undo the settlement first, then delete it.';
+    }
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
     notifyListeners();
     _persist(FirestoreRepository.instance.deleteExpense(group.id, id));
+    return null;
   }
 
   /// Only the account that created/logged this expense may edit it.
@@ -715,6 +717,19 @@ class SplitProvider extends ChangeNotifier {
     if (finalSplitMap is String) return finalSplitMap; // error message
 
     final newSplitMap = finalSplitMap as Map<int, double>;
+
+    // Pair-settlement allocations are written by the trusted callable. Do not
+    // let an expense edit invalidate those allocations or silently change the
+    // balance that was already reconciled. Description-only edits remain safe.
+    final splitChanged = original.splitMap.length != newSplitMap.length ||
+        original.splitMap.entries.any((entry) =>
+            (newSplitMap[entry.key] == null) ||
+            (entry.value - newSplitMap[entry.key]!).abs() >= 0.005);
+    final amountChanged = (original.amount - amount).abs() >= 0.005;
+    if (original.settledAmounts.values.any((value) => value > 0.005) &&
+        (splitChanged || amountChanged)) {
+      return 'This expense has a recorded pair settlement. You can edit its description, but not its amount or split.';
+    }
 
     // Keep "paid" flags only for people still in the split whose share
     // didn't change — a changed share means the old payment no longer
@@ -785,6 +800,12 @@ class SplitProvider extends ChangeNotifier {
     }
     if (personId == expense.payerId) {
       return; // Cannot toggle/revert the person who paid
+    }
+    // Only a fully covered share is locked. If a pair settlement covered
+    // part of this share, its creator may still mark the remainder paid to
+    // forgive it (or undo that manual forgiveness later).
+    if (expense.isShareCoveredByPairSettlement(personId)) {
+      return;
     }
 
     final isExpenseCreator = expense.addedBy == _uid;
@@ -976,31 +997,71 @@ class SplitProvider extends ChangeNotifier {
   /// settlement expense directly — that's what makes "settle up from here
   /// owes you, that side is enforced the same way everywhere, not just in
   /// this specific group's Balances tab.
+  /// Undoes a recorded settlement. Either person in the pair may do this,
+  /// which lets a creditor dispute a payment the debtor recorded. Returns an
+  /// error message, or null on success; expense streams refresh the balances.
+  Future<String?> revertSettlement(String groupId, String settlementId) async {
+    try {
+      await FirestoreRepository.instance.revertSettlement(groupId, settlementId);
+      return null;
+    } on FirebaseFunctionsException catch (error) {
+      return error.message ?? 'Could not undo the settlement.';
+    } catch (error) {
+      debugPrint('SplitProvider: revertSettlement failed: $error');
+      return 'Could not undo the settlement. Refresh and try again.';
+    }
+  }
+
   Future<List<String>> settlePairwise(OverallBalance entry) async {
     final errors = <String>[];
-
-    for (final contrib in entry.breakdown) {
-      if (contrib.amount.abs() <= 0.005) continue;
-
-      // Settlement record logic:
-      // If amount > 0 (they owe you), then record that THEY paid YOU.
-      // If amount < 0 (you owe them), then record that YOU paid THEM.
-      final fromId = contrib.amount > 0 ? contrib.counterpartId : contrib.myId;
-      final toId = contrib.amount > 0 ? contrib.myId : contrib.counterpartId;
-
-      final error = await settleUp(
-        fromId,
-        toId,
-        contrib.amount.abs(),
-        groupId: contrib.groupId,
-      );
-      if (error != null) {
-        errors.add('"${contrib.groupName}": $error');
-      }
-      // No manual local-state update needed on success — the Firestore
-      // stream for that group picks up the new expense and rebuilds.
+    final byCurrency = <String, List<GroupContribution>>{};
+    for (final contribution in entry.breakdown) {
+      if (contribution.amount.abs() <= 0.005) continue;
+      byCurrency.putIfAbsent(contribution.currency, () => []).add(contribution);
     }
 
+    // A person may have opposite debts in different groups. Settle each
+    // currency's combined net once, rather than paying every gross group
+    // contribution (which would over-settle the pair).
+    for (final currencyEntry in byCurrency.entries) {
+      final currency = currencyEntry.key;
+      final contributions = currencyEntry.value;
+      final netAmount = entry.currencyBalances[currency] ??
+          contributions.fold<double>(0, (sum, item) => sum + item.amount);
+      final roundedNet = (netAmount.abs() * 100).round() / 100;
+
+      // Positive from the user's perspective means the other person owes the
+      // user; negative means the user owes them. At zero, either direction is
+      // valid for reconciling the opposite debts without an external payment.
+      final direction = netAmount.abs() > 0.005
+          ? netAmount
+          : contributions.first.amount;
+      final groups = contributions.map((contribution) {
+        final fromId = direction > 0
+            ? contribution.counterpartId
+            : contribution.myId;
+        final toId = direction > 0
+            ? contribution.myId
+            : contribution.counterpartId;
+        return <String, dynamic>{
+          'groupId': contribution.groupId,
+          'fromId': fromId,
+          'toId': toId,
+        };
+      }).toList();
+
+      try {
+        await FirestoreRepository.instance.recordCrossGroupPairSettlement(
+          groups: groups,
+          amount: roundedNet,
+        );
+      } on FirebaseFunctionsException catch (error) {
+        errors.add('$currency: ${error.message ?? 'Could not record settlement.'}');
+      } catch (error) {
+        debugPrint('SplitProvider: cross-group settlement failed: $error');
+        errors.add('$currency: Could not record settlement. Refresh and try again.');
+      }
+    }
     return errors;
   }
 

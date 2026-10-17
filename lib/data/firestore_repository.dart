@@ -3,6 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/expense.dart';
+import '../models/settlement_record.dart';
 import '../models/group.dart';
 
 /// Cloud persistence for groups and their expenses.
@@ -120,12 +121,20 @@ class FirestoreRepository {
     }
   }
 
-  /// Overwrites an existing expense in place (edits, and per-person
-  /// paid/pending toggles via `settledBy`). Restricted server-side to
-  /// whoever originally added it (`addedBy`) or the group's creator.
+  /// Overwrites an existing expense in place for edits. Firestore rules
+  /// restrict this to the original expense author and prevent client writes
+  /// from changing trusted pair-settlement allocation metadata.
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
-      await _expensesCol(groupId).doc(expense.id).set(expense.toJson());
+      // update() with only the editable fields, never set(): set() would
+      // resend createdAt (a not-yet-synced serverTimestamp placeholder fails
+      // the "createdAt unchanged" rule) and a possibly stale settledAmounts
+      // (rejected by the rules if a settlement was just recorded).
+      final fields = expense.toJson()
+        ..remove('createdAt') // immutable
+        ..remove('addedBy') // immutable
+        ..remove('settledAmounts'); // written only by the settlement callables
+      await _expensesCol(groupId).doc(expense.id).update(fields);
     } catch (e, st) {
       debugPrint('FirestoreRepository.updateExpense failed: $e\n$st');
       rethrow;
@@ -179,6 +188,60 @@ class FirestoreRepository {
       'toId': toId,
       'amount': amount,
     });
+  }
+
+  /// Atomically records one net settlement across several groups that use
+  /// the same currency. Group/person membership and balances are revalidated
+  /// by the trusted callable before any expense share is updated.
+  Future<void> recordCrossGroupPairSettlement({
+    required List<Map<String, dynamic>> groups,
+    required double amount,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Your session has expired. Sign in again to record a settlement.',
+      );
+    }
+    final token = await user.getIdToken(true);
+    if (token == null || token.isEmpty) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Could not refresh your sign-in. Please sign in again.',
+      );
+    }
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('recordCrossGroupPairSettlement');
+    await callable.call({'groups': groups, 'amount': amount});
+  }
+
+  /// Live settlement audit log for [groupId], newest first.
+  Stream<List<SettlementRecord>> watchSettlements(String groupId) {
+    return _expensesCol(groupId)
+        .parent!
+        .collection('settlements')
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((doc) => SettlementRecord.fromDoc(groupId, doc))
+        .toList());
+  }
+
+  /// Undoes a recorded settlement (and the rest of its cross-group batch)
+  /// through the trusted callable.
+  Future<void> revertSettlement(String groupId, String settlementId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Your session has expired. Sign in again to undo a settlement.',
+      );
+    }
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('revertSettlement');
+    await callable.call({'groupId': groupId, 'settlementId': settlementId});
   }
 
   Future<void> deleteExpense(String groupId, String expenseId) async {

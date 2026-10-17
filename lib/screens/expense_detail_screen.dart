@@ -22,6 +22,16 @@ class ExpenseDetailScreen extends StatelessWidget {
   Future<void> _confirmDelete(
       BuildContext context, SplitProvider provider, Expense live) async {
     final isSettlement = live.isSettlement;
+    if (!isSettlement && live.settledAmounts.values.any((v) => v > 0.005)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'This expense is part of a recorded settlement. Undo the '
+              'settlement first (Balances → Settlement history), then delete it.'),
+        ),
+      );
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -57,8 +67,14 @@ class ExpenseDetailScreen extends StatelessWidget {
     );
 
     if (confirmed == true) {
-      if (context.mounted) Navigator.pop(context); // Go back to group detail
-      provider.removeExpense(live.id);
+      final error = provider.removeExpense(live.id);
+      if (!context.mounted) return;
+      if (error != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error)));
+        return;
+      }
+      Navigator.pop(context);
     }
   }
 
@@ -347,12 +363,16 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final isPayer = person.id == liveExpense.payerId;
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
+                      final settledViaPair =
+                          liveExpense.isShareCoveredByPairSettlement(person.id);
                       final isSettled = liveExpense.isPersonPaid(person.id);
                       final isPartial =
                           liveExpense.isPersonPartiallyPaid(person.id);
+                      final canToggleThisShare = canToggle &&
+                          !isPayer && !settledViaPair;
 
                       return GestureDetector(
-                        onTap: (canToggle && !isPayer)
+                        onTap: canToggleThisShare
                             ? () {
                                 provider.togglePersonSettlement(
                                     liveExpense.id, person.id);
@@ -452,13 +472,15 @@ class ExpenseDetailScreen extends StatelessWidget {
                                         fontWeight: FontWeight.w900,
                                         color: AppColors.ink),
                                   ),
-                                  if (canToggle && !isPayer)
+                                  if (settledViaPair || canToggleThisShare)
                                     Padding(
                                       padding: EdgeInsets.only(top: 4.h),
                                       child: Text(
-                                        isSettled
-                                            ? 'Tap to mark pending'
-                                            : 'Tap to mark paid',
+                                        settledViaPair
+                                            ? 'Pair settlement applied'
+                                            : (isSettled
+                                                ? 'Tap to mark pending'
+                                                : 'Tap to mark paid'),
                                         style: TextStyle(
                                           fontSize: 8.sp,
                                           color: AppColors.slate,
