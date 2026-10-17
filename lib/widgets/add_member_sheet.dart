@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -32,11 +34,75 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   bool _permissionDenied = false;
   bool _loaded = false;
   String? _error;
+  Timer? _lookupDebounce;
+  bool _lookupLoading = false;
+  bool _lookupAttempted = false;
+  String? _lookupError;
+  Map<String, dynamic>? _registeredUser;
+  bool _ambiguousMatch = false;
 
   @override
   void dispose() {
+    _lookupDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  String _digitsOnly(String value) => value.replaceAll(RegExp('[^0-9]'), '');
+
+  void _onSearchChanged(String value) {
+    setState(() {
+      _query = value.trim().toLowerCase();
+      _lookupDebounce?.cancel();
+      _registeredUser = null;
+      _lookupError = null;
+      _lookupAttempted = false;
+      _ambiguousMatch = false;
+      _lookupLoading = false;
+    });
+    if (_digitsOnly(value).length < 7) return;
+    _lookupDebounce = Timer(const Duration(milliseconds: 450), () {
+      _lookupRegisteredUser(value);
+    });
+  }
+
+  Future<void> _lookupRegisteredUser(String phoneNumber) async {
+    if (!mounted) return;
+    setState(() { _lookupLoading = true; _lookupError = null; });
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('lookupRegisteredUserByPhone');
+      final response = await callable.call(<String, dynamic>{'phoneNumber': phoneNumber});
+      if (!mounted) return;
+      final data = Map<String, dynamic>.from(response.data as Map);
+      setState(() {
+        _lookupLoading = false;
+        _lookupAttempted = true;
+        _ambiguousMatch = data['ambiguous'] == true;
+        _registeredUser = data['found'] == true && data['user'] is Map ? Map<String, dynamic>.from(data['user'] as Map) : null;
+      });
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      setState(() { _lookupLoading = false; _lookupError = error.code == 'resource-exhausted' ? 'Too many searches. Wait a minute and try again.' : 'Could not search registered users. Please try again.'; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _lookupLoading = false; _lookupError = 'Could not search registered users. Please try again.'; });
+    }
+  }
+
+  void _addRegisteredUser() {
+    final user = _registeredUser;
+    if (user == null) return;
+    if (!context.read<SplitProvider>().isCurrentGroupOwner) return;
+    final name = user['name'] as String? ?? 'Nus·Nus user';
+    context.read<SplitProvider>().addPerson(name, linkedUserId: user['uid'] as String);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added ' + name + ' if not already a member.')));
+  }
+
+  Future<void> _shareTypedInvite() async {
+    final group = context.read<SplitProvider>().currentGroup;
+    if (group == null || _digitsOnly(_searchController.text).length < 7) return;
+    final label = group.name.trim().isEmpty ? '' : ' for ' + group.name;
+    await Share.share('Join me on Nus·Nus so we can track shared expenses' + label + '!\nOpen Nus·Nus: https://nus-nus.web.app\n\nAfter registering, ask me to add you to the group.', subject: 'Nus·Nus invitation');
   }
 
   Future<void> _loadContacts() async {
@@ -181,11 +247,10 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
             padding: EdgeInsets.fromLTRB(20.w, 12.h, 20.w, 12.h),
             child: TextField(
               controller: _searchController,
-              onChanged: (value) =>
-                  setState(() => _query = value.trim().toLowerCase()),
+              onChanged: _onSearchChanged,
               style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
               decoration: InputDecoration(
-                hintText: 'Search contacts by name or number',
+                hintText: 'Search registered users by phone number',
                 hintStyle: const TextStyle(color: AppColors.slate),
                 prefixIcon: const Icon(Icons.search, color: AppColors.slate),
                 suffixIcon: _query.isEmpty
@@ -207,6 +272,28 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
               ),
             ),
           ),
+          if (_lookupLoading)
+            Padding(padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 4.h), child: const LinearProgressIndicator(color: AppColors.brass)),
+          if (_registeredUser != null)
+            Padding(
+              padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 10.h),
+              child: Card(child: ListTile(
+                leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+                title: Text((_registeredUser!['name'] as String?) ?? 'Nus·Nus user'),
+                subtitle: const Text('Registered Nus·Nus account'),
+                trailing: provider.isCurrentGroupOwner ? IconButton(tooltip: 'Add to group', icon: const Icon(Icons.person_add_alt_1), onPressed: _addRegisteredUser) : null,
+              )),
+            ),
+          if (_lookupAttempted && _registeredUser == null)
+            Padding(
+              padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 10.h),
+              child: Row(children: [
+                Expanded(child: Text(_ambiguousMatch ? 'More than one account has this number. Ask the person to update their profile.' : 'No registered account found for this number.', style: TextStyle(color: AppColors.slate, fontSize: 12.sp))),
+                if (!_ambiguousMatch) TextButton.icon(onPressed: _shareTypedInvite, icon: const Icon(Icons.share_outlined), label: const Text('Invite')),
+              ]),
+            ),
+          if (_lookupError != null)
+            Padding(padding: EdgeInsets.symmetric(horizontal: 20.w), child: Text(_lookupError!, style: TextStyle(color: AppColors.rust, fontSize: 12.sp))),
           if (_error != null)
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 20.w),
@@ -342,7 +429,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
             padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 16.h),
             child: Text(
               provider.isCurrentGroupOwner
-                  ? 'Phone verification and account matching will be added later. Sharing an invite does not add the person to this group.'
+                  ? 'Phone numbers are matched against existing account profiles; a match does not verify ownership of that number.'
                   : 'Only the group owner can add members. You can still share the app with a contact.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.slate, fontSize: 10.5.sp),
