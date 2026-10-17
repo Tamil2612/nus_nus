@@ -143,9 +143,9 @@ service cloud.firestore {
             request.resource.data.createdAt == resource.data.createdAt &&
             (request.auth.uid == resource.data.addedBy ||
               request.resource.data.settledBy == resource.data.settledBy) &&
-            (request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) ||
-              (request.auth.uid == resource.data.addedBy &&
-                request.resource.data.diff(resource.data).affectedKeys().hasAny(['splitMap', 'amount']))) &&
+            // Only the trusted callable may change pair-settlement allocations.
+            // Expense authors must not be able to erase or forge recorded settlements.
+            request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) &&
             request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
             request.resource.data.amount <= 100000000 &&
