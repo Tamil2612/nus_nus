@@ -73,7 +73,67 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       final national = digits.substring(3);
       return national.startsWith('0') ? national : '0$national';
     }
-    if (RegExp(r'^5\d{8}
+    if (digits.length == 9 && digits.startsWith('5')) return '0$digits';
+    return digits;
+  }
+
+  Future<void> _matchLoadedContacts(List<Contact> contacts) async {
+    final phoneNumbers = <String>{};
+    for (final contact in contacts) {
+      for (final phone in contact.phones) {
+        final raw = phone.number.trim();
+        final key = _phoneKey(raw);
+        if (key.length >= 7 && key.length <= 15) phoneNumbers.add(raw);
+      }
+    }
+    if (phoneNumbers.isEmpty) return;
+    // A bounded batch avoids one network call per contact. Manual typed-number
+    // lookup remains available for numbers outside this batch.
+    final batch = phoneNumbers.take(500).toList();
+    if (mounted) setState(() => _matchingContacts = true);
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('lookupRegisteredUsersByPhones');
+      final response = await callable.call(<String, dynamic>{
+        'phoneNumbers': batch,
+      });
+      if (!mounted) return;
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final rawMatches = data['matches'];
+      final rawAmbiguous = data['ambiguous'];
+      setState(() {
+        _registeredContacts.clear();
+        _ambiguousContactPhones.clear();
+        if (rawMatches is Map) {
+          for (final entry in rawMatches.entries) {
+            if (entry.value is Map) {
+              _registeredContacts[entry.key.toString()] =
+                  Map<String, dynamic>.from(entry.value as Map);
+            }
+          }
+        }
+        if (rawAmbiguous is List) {
+          _ambiguousContactPhones.addAll(rawAmbiguous.map((item) => item.toString()));
+        }
+        _matchingContacts = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _matchingContacts = false);
+      // Contact browsing still works if matching is unavailable.
+    }
+  }
+
+  Map<String, dynamic>? _registeredContactFor(Contact contact) {
+    for (final phone in contact.phones) {
+      final user = _registeredContacts[_phoneKey(phone.number)];
+      if (user != null) return user;
+    }
+    return null;
+  }
+
+  bool _hasAmbiguousContactPhone(Contact contact) => contact.phones
+      .any((phone) => _ambiguousContactPhones.contains(_phoneKey(phone.number)));
+
   void _onSearchChanged(String value) {
     setState(() {
       _query = value.trim().toLowerCase();
