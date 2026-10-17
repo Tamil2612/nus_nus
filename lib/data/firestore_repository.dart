@@ -181,6 +181,32 @@ class FirestoreRepository {
     });
   }
 
+  /// Atomically records one net settlement across several groups that use
+  /// the same currency. Group/person membership and balances are revalidated
+  /// by the trusted callable before any expense share is updated.
+  Future<void> recordCrossGroupPairSettlement({
+    required List<Map<String, dynamic>> groups,
+    required double amount,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Your session has expired. Sign in again to record a settlement.',
+      );
+    }
+    final token = await user.getIdToken(true);
+    if (token == null || token.isEmpty) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Could not refresh your sign-in. Please sign in again.',
+      );
+    }
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('recordCrossGroupPairSettlement');
+    await callable.call({'groups': groups, 'amount': amount});
+  }
+
   Future<void> deleteExpense(String groupId, String expenseId) async {
     try {
       await _expensesCol(groupId).doc(expenseId).delete();
