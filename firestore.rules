@@ -92,8 +92,10 @@ service cloud.firestore {
           request.resource.data.text != resource.data.text &&
           request.resource.data.isEdited == true;
 
-        allow delete: if chatGroupMember() &&
-          (request.auth.uid == resource.data.senderUid || isGroupOwner());
+        // A settlement allocation must be undone before deleting its source expense.
+        allow delete: if isGroupMember() &&
+          request.auth.uid == resource.data.addedBy &&
+          resource.data.get('settledAmounts', {}).size() == 0;
       }
 
       match /expenses/{expenseId} {
@@ -174,6 +176,13 @@ service cloud.firestore {
         // Only the original expense logger may delete an expense.
         allow delete: if isGroupMember() &&
           request.auth.uid == resource.data.addedBy;
+      }
+
+      // Settlement audit entries are written only by trusted Admin SDK callables.
+      match /settlements/{settlementId} {
+        allow read: if signedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+        allow write: if false;
       }
     }
   }
