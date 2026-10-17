@@ -654,22 +654,29 @@ class SplitProvider extends ChangeNotifier {
     }
   }
 
-  /// deleting an expense someone else logged (or your own) is a destructive
-  /// action, so it's kept restricted to whoever originally added it or the payer.
-  void removeExpense(String id) {
+  /// Deletes an expense. Returns an error message if it can't be deleted.
+  /// Expenses with recorded pair-settlement allocations must be undone first,
+  /// otherwise removing the source share would leave the other side short.
+  String? removeExpense(String id) {
     final group = currentGroup;
-    if (group == null) return;
+    if (group == null) return 'Select a group first.';
 
     final existingIndex = expenses.indexWhere((e) => e.id == id);
-    if (existingIndex == -1) return;
+    if (existingIndex == -1) return 'That expense no longer exists.';
 
     final expense = expenses[existingIndex];
-    if (expense.addedBy != _uid) return; // only the expense creator may delete
+    if (expense.addedBy != _uid) {
+      return 'Only the person who logged this expense can delete it.';
+    }
+    if (expense.settledAmounts.values.any((value) => value > 0.005)) {
+      return 'This expense is part of a recorded settlement. Undo the settlement first, then delete it.';
+    }
 
     _expensesByGroup[group.id] = expenses.where((e) => e.id != id).toList();
     _rebuildGroups();
     notifyListeners();
     _persist(FirestoreRepository.instance.deleteExpense(group.id, id));
+    return null;
   }
 
   /// Only the account that created/logged this expense may edit it.
