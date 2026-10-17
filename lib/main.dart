@@ -19,18 +19,30 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Install an App Check provider before callable Firebase requests are made.
-  // Debug builds use the debug provider; register its printed token in the
-  // Firebase Console under App Check > Manage debug tokens. Release Android
-  // builds use Play Integrity.
+  // Install App Check before any Firebase callable requests are made.
+  // Debug builds use the debug provider; register its token in Firebase
+  // Console > App Check > Manage debug tokens. Release Android builds use
+  // Play Integrity.
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     try {
       await FirebaseAppCheck.instance.activate(
-        providerAndroid: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        androidProvider: AndroidAppCheckProviderFactory.custom(
+          kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        ),
       );
     } catch (error) {
-      // Keep the app usable for diagnostics; enforced App Check requests will
-      // still fail until the provider is correctly configured.
+      // Do not bypass App Check. If enforcement is enabled, requests will fail
+      // until the provider is configured correctly.
+      debugPrint('Firebase App Check activation failed: $error');
+    }
+  } else if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS)) {
+    try {
+      await FirebaseAppCheck.instance.activate(
+        appleProvider: AppleProvider.debug,
+      );
+    } catch (error) {
       debugPrint('Firebase App Check activation failed: $error');
     }
   }
