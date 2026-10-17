@@ -43,6 +43,16 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   int _lookupSequence = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Load local contacts once when the picker opens so name search works
+    // immediately; typed-number lookup works independently of permission.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadContacts();
+    });
+  }
+
+  @override
   void dispose() {
     _lookupDebounce?.cancel();
     _searchController.dispose();
@@ -386,6 +396,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                 ),
               ),
             )
+          else if (filtered.isEmpty && _digitsOnly(_query).length >= 7)
+            const Expanded(child: SizedBox.shrink())
           else if (filtered.isEmpty)
             Expanded(
               child: Center(
