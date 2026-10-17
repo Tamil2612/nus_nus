@@ -9,7 +9,7 @@ import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 
 /// Opens a privacy-conscious contact picker. Contact data stays on-device;
-/// no address-book upload or unverified phone-number matching is performed.
+/// no address-book upload is performed. Typed phone numbers are looked up against stored profiles.
 void showAddMemberSheet(BuildContext context) {
   showModalBottomSheet<void>(
     context: context,
@@ -170,8 +170,6 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   String _normaliseText(String value) =>
       value.trim().toLowerCase().replaceAll(RegExp('\\s+'), ' ');
 
-  String _digitsOnly(String value) => value.replaceAll(RegExp('[^0-9]'), '');
-
   bool _matchesSearch(Contact contact) {
     final query = _normaliseText(_query);
     if (query.isEmpty) return true;
@@ -258,8 +256,15 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                     : IconButton(
                         tooltip: 'Clear search',
                         onPressed: () {
+                          _lookupDebounce?.cancel();
                           _searchController.clear();
-                          setState(() => _query = '');
+                          setState(() {
+                            _query = '';
+                            _registeredUser = null;
+                            _lookupAttempted = false;
+                            _lookupError = null;
+                            _ambiguousMatch = false;
+                          });
                         },
                         icon: const Icon(Icons.close, color: AppColors.slate),
                       ),
