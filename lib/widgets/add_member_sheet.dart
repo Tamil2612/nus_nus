@@ -304,9 +304,18 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     // Ignore spaces, +, brackets and hyphens when searching phone numbers.
     final queryDigits = _digitsOnly(query);
     if (queryDigits.isEmpty) return false;
-    return contact.phones.any(
-      (phone) => _digitsOnly(phone.number).contains(queryDigits),
-    );
+
+    // Normalize both sides so a +971 query matches a contact saved as 05...,
+    // and a local UAE number matches a profile/contact saved as 971...
+    final queryKey = _phoneKey(query);
+    return contact.phones.any((phone) {
+      final phoneDigits = _digitsOnly(phone.number);
+      final phoneKey = _phoneKey(phone.number);
+      if (queryKey.length >= 7 && queryKey == phoneKey) return true;
+      return phoneDigits.contains(queryDigits) ||
+          phoneKey.contains(queryKey) ||
+          queryDigits.contains(phoneKey);
+    });
   }
 
   @override
