@@ -418,6 +418,10 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
         }
       }
       const netCents = forwardCents - reverseCents - legacyForwardCents + legacyReverseCents;
+      if (legacyReverseCents > reverseCents) {
+        throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely. Please review the affected group.');
+      }
+      const reverseAllocationCents = reverseCents - legacyReverseCents;
       if (netCents <= 0) {
         throw new functions.https.HttpsError(
           'failed-precondition',
@@ -473,11 +477,8 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // Reconcile all reverse-direction debt as an offset, then apply the
       // user's actual settlement amount to the forward debt. This preserves
       // the net balance after partial settlements and avoids fake payments.
-      allocate(fromId, toId, reverseCents);
-      // Legacy settlement cards already reduce the ledger balance but do not
-      // have mutable share allocations. Account for them when choosing how much
-      // of the remaining real expense shares this new settlement must cover.
-      allocate(toId, fromId, reverseCents + requestedCents + legacyForwardCents - legacyReverseCents);
+      allocate(fromId, toId, reverseAllocationCents);
+      allocate(toId, fromId, reverseAllocationCents + requestedCents);
       const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
@@ -491,7 +492,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
         fromId,
         toId,
         amountCents: requestedCents,
-        offsetCents: reverseCents,
+        offsetCents: reverseAllocationCents,
         currency: String(group.currency || 'AED').toUpperCase(),
         recordedBy: context.auth.uid,
         participantUids: [fromPerson.linkedUserId, toPerson.linkedUserId].filter(Boolean),
@@ -629,6 +630,10 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
       }
 
       const netCents = forwardCents - reverseCents - legacyForwardCents + legacyReverseCents;
+      if (legacyReverseCents > reverseCents) {
+        throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely. Please review the affected groups.');
+      }
+      const reverseAllocationCents = reverseCents - legacyReverseCents;
       if (netCents < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'The debt direction changed. Refresh balances and try again.');
       }
@@ -643,7 +648,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
       // Reconcile opposite debts across all included groups first, then the
       // requested net amount. The direction IDs are consistent per group.
       // Allocate reverse shares per group; this callback keeps IDs group-local.
-      let reverseRemaining = reverseCents;
+      let reverseRemaining = reverseAllocationCents;
       for (const item of snapshots) {
         for (const doc of item.expenseDocs) {
           if (reverseRemaining <= 0) break;
@@ -666,10 +671,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError('failed-precondition', 'Could not reconcile all opposing debts safely.');
       }
 
-      // Existing legacy settlement cards affect the net balance but are not
-      // eligible for allocation/undo. Account for their historical effect when
-      // deciding how much remaining real expense debt this settlement covers.
-      const forwardTarget = reverseCents + requestedCents + legacyForwardCents - legacyReverseCents;
+      const forwardTarget = reverseAllocationCents + requestedCents;
       if (forwardTarget < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely.');
       }
@@ -713,7 +715,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
           fromId: item.fromId,
           toId: item.toId,
           amountCents: requestedCents,
-          offsetCents: reverseCents,
+          offsetCents: reverseAllocationCents,
           currency: [...currencySet][0],
           recordedBy: context.auth.uid,
           participantUids: [item.fromPerson.linkedUserId, item.toPerson.linkedUserId].filter(Boolean),
