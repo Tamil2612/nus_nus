@@ -120,9 +120,9 @@ class FirestoreRepository {
     }
   }
 
-  /// Overwrites an existing expense in place (edits, and per-person
-  /// paid/pending toggles via `settledBy`). Restricted server-side to
-  /// whoever originally added it (`addedBy`) or the group's creator.
+  /// Overwrites an existing expense in place for edits. Firestore rules
+  /// restrict this to the original expense author and prevent client writes
+  /// from changing trusted pair-settlement allocation metadata.
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
       await _expensesCol(groupId).doc(expense.id).set(expense.toJson());
