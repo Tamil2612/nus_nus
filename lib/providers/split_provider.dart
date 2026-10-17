@@ -595,19 +595,14 @@ class SplitProvider extends ChangeNotifier {
     return null;
   }
 
-  /// Settles up between [fromId] and [toId] in [groupId] (defaults to the
-  /// currently open group) by marking their open shares as paid on the
-  /// individual expenses — no separate settlement record is created, so the
-  /// activity feed stays clean and every expense's PAID/PENDING status
-  /// stays the single source of truth.
+  /// Records an external settlement between [fromId] and [toId] in [groupId]
+  /// (defaults to the currently open group). The trusted callable validates
+  /// the latest net balance and updates settlement-allocation metadata on the
+  /// existing expense shares; it does not move money or create a payment card.
   ///
-  /// Both directions between the pair are cleared (shares [fromId] owes on
-  /// expenses [toId] paid, and vice versa) because the Balances tab shows
-  /// the *net* of the two; clearing only one side would flip the balance
-  /// instead of zeroing it. [amount] is only validated — the amount to pay
-  /// is whatever the Balances tab showed for the pair.
-  ///
-  /// This is the single place that validates pairwise settlement requests.
+  /// Opposing debts are reconciled first, then [amount] is allocated against
+  /// the remaining debt direction. This preserves the pair's net balance for
+  /// partial settlements and keeps original expense amounts and splits intact.
   /// Either linked participant in the debtor-creditor pair may confirm; the
   /// callable revalidates the balance and atomically records the allocation.
   Future<String?> settleUp(int fromId, int toId, double amount, {String? groupId}) async {
