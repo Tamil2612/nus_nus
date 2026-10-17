@@ -173,9 +173,11 @@ service cloud.firestore {
           )
         );
 
-        // Only the original expense logger may delete an expense.
+        // Only the original expense logger may delete an expense, and only
+        // after all pair-settlement allocations against it have been undone.
         allow delete: if isGroupMember() &&
-          request.auth.uid == resource.data.addedBy;
+          request.auth.uid == resource.data.addedBy &&
+          resource.data.get('settledAmounts', {}).size() == 0;
       }
 
       // Settlement audit entries are written only by trusted Admin SDK callables.
