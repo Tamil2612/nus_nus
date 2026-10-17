@@ -716,6 +716,19 @@ class SplitProvider extends ChangeNotifier {
 
     final newSplitMap = finalSplitMap as Map<int, double>;
 
+    // Pair-settlement allocations are written by the trusted callable. Do not
+    // let an expense edit invalidate those allocations or silently change the
+    // balance that was already reconciled. Description-only edits remain safe.
+    final splitChanged = original.splitMap.length != newSplitMap.length ||
+        original.splitMap.entries.any((entry) =>
+            (newSplitMap[entry.key] == null) ||
+            (entry.value - newSplitMap[entry.key]!).abs() >= 0.005);
+    final amountChanged = (original.amount - amount).abs() >= 0.005;
+    if (original.settledAmounts.values.any((value) => value > 0.005) &&
+        (splitChanged || amountChanged)) {
+      return 'This expense has a recorded pair settlement. You can edit its description, but not its amount or split.';
+    }
+
     // Keep "paid" flags only for people still in the split whose share
     // didn't change — a changed share means the old payment no longer
     // matches what they owe. The payer always stays marked as paid.
@@ -785,6 +798,11 @@ class SplitProvider extends ChangeNotifier {
     }
     if (personId == expense.payerId) {
       return; // Cannot toggle/revert the person who paid
+    }
+    // A share already reconciled by the trusted pair-settlement flow must not
+    // be changed through the manual paid/pending toggle.
+    if ((expense.settledAmounts[personId] ?? 0) > 0.005) {
+      return;
     }
 
     final isExpenseCreator = expense.addedBy == _uid;
