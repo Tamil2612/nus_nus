@@ -431,6 +431,12 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // 40 share, while only 60 represents the external amount paid.
       const writesByPath = new Map();
       const allocate = (payerId, debtorId, centsToAllocate) => {
+        if (!Number.isSafeInteger(centsToAllocate) || centsToAllocate < 0) {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'Legacy settlement history cannot be reconciled safely. Please review the affected group.'
+          );
+        }
         let remaining = centsToAllocate;
         for (const doc of expenseDocs) {
           if (remaining <= 0) break;
