@@ -461,7 +461,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // user's actual settlement amount to the forward debt. This preserves
       // the net balance after partial settlements and avoids fake payments.
       allocate(fromId, toId, reverseCents);
-      allocate(toId, fromId, reverseCents + requestedCents);
+      allocate(toId, fromId, reverseCents + requestedCents + legacyForwardCents - legacyReverseCents);
       const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
@@ -486,7 +486,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
 
   const amount = Number(data.amount);
   const groupsInput = data.groups;
-  if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000 ||
+  if (!Number.isFinite(amount) || amount < 0 || amount > 100000000 ||
       !Array.isArray(groupsInput) || groupsInput.length < 1 || groupsInput.length > 50) {
     throw new functions.https.HttpsError('invalid-argument', 'Invalid cross-group settlement details.');
   }
@@ -587,8 +587,11 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
       }
 
       const netCents = forwardCents - reverseCents - legacyForwardCents + legacyReverseCents;
-      if (netCents <= 0) {
+      if (netCents < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'The debt direction changed. Refresh balances and try again.');
+      }
+      if (requestedCents === 0 && netCents !== 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'A zero-amount settlement is only valid when opposite debts cancel out.');
       }
       if (requestedCents > netCents) {
         throw new functions.https.HttpsError('failed-precondition', 'Settlement amount exceeds the current combined net balance.');
