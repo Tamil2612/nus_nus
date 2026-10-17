@@ -23,29 +23,15 @@ Future<void> main() async {
   // Debug builds use the debug provider; register its token in Firebase
   // Console > App Check > Manage debug tokens. Release Android builds use
   // Play Integrity.
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    try {
-      await FirebaseAppCheck.instance.activate(
-        androidProvider: AndroidAppCheckProviderFactory.custom(
-          kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
-        ),
-      );
-    } catch (error) {
-      // Do not bypass App Check. If enforcement is enabled, requests will fail
-      // until the provider is configured correctly.
-      debugPrint('Firebase App Check activation failed: $error');
-    }
-  } else if (!kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.macOS)) {
-    try {
-      await FirebaseAppCheck.instance.activate(
-        appleProvider: AppleProvider.debug,
-      );
-    } catch (error) {
-      debugPrint('Firebase App Check activation failed: $error');
-    }
-  }
+  await FirebaseAppCheck.instance.activate(
+    providerWeb: ReCaptchaV3Provider('6LdDD20tAAAAAOzELBUSgYE3PKsBdzKprh8gJ5rv'),
+    providerAndroid: kDebugMode
+        ? const AndroidDebugProvider()
+        : const AndroidPlayIntegrityProvider(),
+    providerApple: kDebugMode
+        ? const AppleDebugProvider()
+        : const AppleDeviceCheckProvider(), // Or const AppleAppAttestWithDeviceCheckFallbackProvider()
+  );
 
   // Lets notification taps open the right expense, and shows an in-app banner
   // for pushes that arrive while the app is open (Android).
