@@ -6,6 +6,7 @@ const {
   groupAllocationsByExpense,
   subtractAllocations,
   canRevert,
+  settlementAllocationTargets,
 } = require('./settlement_log');
 
 // Initialize Firebase Admin
@@ -421,7 +422,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       if (legacyReverseCents > reverseCents) {
         throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely. Please review the affected group.');
       }
-      const reverseAllocationCents = reverseCents - legacyReverseCents;
+      const { reverseAllocationCents, forwardTargetCents } = settlementAllocationTargets({ reverseCents, legacyForwardCents, legacyReverseCents, requestedCents });
       if (netCents <= 0) {
         throw new functions.https.HttpsError(
           'failed-precondition',
@@ -478,7 +479,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // user's actual settlement amount to the forward debt. This preserves
       // the net balance after partial settlements and avoids fake payments.
       allocate(fromId, toId, reverseAllocationCents);
-      allocate(toId, fromId, reverseAllocationCents + legacyForwardCents + requestedCents);
+      allocate(toId, fromId, forwardTargetCents);
       const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
@@ -671,7 +672,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError('failed-precondition', 'Could not reconcile all opposing debts safely.');
       }
 
-      const forwardTarget = reverseAllocationCents + legacyForwardCents + requestedCents;
+      const forwardTarget = forwardTargetCents;
       if (forwardTarget < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely.');
       }
