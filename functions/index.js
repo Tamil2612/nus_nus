@@ -835,9 +835,9 @@ exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to match your contacts.');
   }
   const rawPhones = data && data.phoneNumbers;
-  if (!Array.isArray(rawPhones) || rawPhones.length < 1 || rawPhones.length > 100 ||
+  if (!Array.isArray(rawPhones) || rawPhones.length < 1 || rawPhones.length > 500 ||
       rawPhones.some((phone) => typeof phone !== 'string' || phone.length > 40)) {
-    throw new functions.https.HttpsError('invalid-argument', 'Send between 1 and 100 phone numbers.');
+    throw new functions.https.HttpsError('invalid-argument', 'Send between 1 and 500 phone numbers.');
   }
 
   const phoneKeys = [...new Set(rawPhones.map(normalizeLookupPhone).filter((phone) => phone.length >= 7 && phone.length <= 15))];
