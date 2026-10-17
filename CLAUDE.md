@@ -10,10 +10,14 @@ Nus·Nus (نص نص) is a smart, localized expense-splitting application designe
 - Natural Language Split Prompts: Type custom split instructions in plain English or Arabic (e.g., "Total 150 AED. Rahul paid. Split evenly between everyone except Sarah who didn't order drinks").
 - "Ask Anything" App State AI Chat: Ask questions directly about your groups and balances (e.g., "How much do I owe across all my trips?" or "Who spent the most on dinner last night?").
 
-### 2. Automated Settlement & Pairwise Debt Minimization
-- Algorithmic Debt Optimization: Built-in settlement calculator resolves complex multi-person group debts down to the minimal possible number of transfer transactions.
-- Creditor-Gated Settlement System: For maximum trust, only the person owed money (the creditor) can officially record or confirm a settlement.
-- Transparent Ledger Flow: View detailed pairwise breakdowns (You owe Person A: 45 AED, Person B owes You: 90 AED) with real-time balance calculations.
+### 2. Pair Settlements, Audit History & Undo
+- Tracking Only: Nus·Nus records settlements made outside the app. It never moves money or creates a synthetic payment expense.
+- Either-Side Confirmation: Either linked person in a debtor-creditor pair can record that the external settlement happened.
+- Atomic Share Allocation: Trusted Cloud Functions reconcile opposing debts first and allocate the net settlement to existing expense shares, including cross-group balances within the same currency.
+- Audit History: Each settlement writes an immutable-by-clients entry to `groups/{groupId}/settlements` with the recorder, timestamp, amount, currency, opposing-debt offset, and exact share allocations.
+- Undo / Dispute: Either person in the pair can call `revertSettlement`. The exact allocations are subtracted and a cross-group batch is undone atomically; the history entry is retained as reverted.
+- Expense Integrity: An expense with active pair-settlement allocations cannot be deleted or have its amount/split changed until the settlement is undone. A partially covered share can still be marked paid by its creator to forgive the remainder.
+- Transparent Ledger Flow: View detailed pairwise breakdowns with balances grouped by currency.
 
 ### 3. Digital Receipt Feed & Group Management
 - Ticket-Style Activity Feed: Expenses are styled as sleek, chronological digital "tabs" showing exact split maps, timestamps, and participant tags.
