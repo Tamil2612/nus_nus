@@ -110,7 +110,7 @@ class _LedgerTabState extends State<LedgerTab> {
               _GroupRoster(
                 people: provider.people,
                 isOwner: provider.isCurrentGroupOwner,
-                onAdd: () => showAddRegisteredMemberSheet(context),
+                onAdd: () => showAddMemberSheet(context),
                 onRemove: (p) => _confirmRemovePerson(context, provider, p),
               ),
               24.verticalSpace,
