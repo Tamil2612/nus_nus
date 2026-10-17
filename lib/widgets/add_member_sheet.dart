@@ -74,11 +74,16 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       final national = digits.substring(3);
       return national.startsWith('0') ? national : '0$national';
     }
-    // Indian mobile: match the same 10-digit national number whether a
-    // contact is saved as 9876543210, +919876543210 or 00919876543210.
+    // Indian mobile numbers compare as the same 10-digit national number.
     if (digits.startsWith('91') &&
         digits.length == 12 &&
-        RegExp(r'^[6-9]\\d{9}
+        RegExp(r'^[6-9]\d{9}$').hasMatch(digits.substring(2))) {
+      return digits.substring(2);
+    }
+    if (RegExp(r'^[6-9]\d{9}$').hasMatch(digits)) return digits;
+    if (digits.length == 9 && digits.startsWith('5')) return '0$digits';
+    return digits;
+  }
 
   Future<void> _matchLoadedContacts(List<Contact> contacts) async {
     final phoneNumbers = <String>{};
