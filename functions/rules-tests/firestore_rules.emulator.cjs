@@ -204,6 +204,51 @@ test('expense author cannot forge or erase trusted pair-settlement allocations',
   await assertSucceeds(updateDoc(expenseRef(author, 'e2'), { desc: 'Dinner updated' }));
 });
 
+test('an expense with a recorded pair settlement cannot be deleted', async () => {
+  await seedExpense({ '2': 25 });
+  const author = env.authenticatedContext('member-a');
+  const otherMember = env.authenticatedContext('member-b');
+  await assertFails(deleteDoc(expenseRef(author)));
+  await assertFails(deleteDoc(expenseRef(otherMember)));
+});
+
+test('an unsettled expense can be deleted only by its author', async () => {
+  await seedExpense();
+  await assertFails(deleteDoc(expenseRef(env.authenticatedContext('member-b'))));
+  await assertFails(deleteDoc(expenseRef(env.authenticatedContext('owner'))));
+  await assertSucceeds(deleteDoc(expenseRef(env.authenticatedContext('member-a'))));
+});
+
+test('settlement audit logs are readable by members but never client-writable', async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'groups/g1/settlements/s1'), {
+      groupId: 'g1',
+      fromId: 2,
+      toId: 1,
+      amountCents: 6000,
+      offsetCents: 4000,
+      currency: 'AED',
+      recordedBy: 'member-a',
+      participantUids: ['member-a', 'member-b'],
+      allocations: [{ expenseId: 'e1', personId: 2, cents: 10000 }],
+      status: 'active',
+      createdAt: new Date('2026-10-16T10:00:00Z'),
+    });
+  });
+  const member = env.authenticatedContext('member-a');
+  const owner = env.authenticatedContext('owner');
+  const outsider = env.authenticatedContext('outsider');
+  const logRef = (context) => doc(context.firestore(), 'groups/g1/settlements/s1');
+  await assertSucceeds(getDoc(logRef(member)));
+  await assertSucceeds(getDoc(logRef(owner)));
+  await assertFails(getDoc(logRef(outsider)));
+  await assertFails(updateDoc(logRef(member), { status: 'reverted' }));
+  await assertFails(deleteDoc(logRef(member)));
+  await assertFails(setDoc(doc(member.firestore(), 'groups/g1/settlements/forged'), {
+    status: 'active',
+  }));
+});
+
 test('chat image Storage is private, size-limited, and member-only', async () => {
   const member = env.authenticatedContext('member-a');
   const outsider = env.authenticatedContext('outsider');
