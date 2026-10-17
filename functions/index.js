@@ -955,8 +955,19 @@ exports.lookupRegisteredUserByPhone = functions.https.onCall(async (data, contex
     const usersSnap = await db.collection('users').get();
     const matches = usersSnap.docs.filter((doc) => {
       if (doc.id === context.auth.uid) return false;
-      const stored = normalizeLookupPhone(doc.get('phoneNumber'));
-      return stored.length >= 7 && stored === queryDigits;
+      const storedPhones = [
+        doc.get('phoneNumber'),
+        doc.get('phone'),
+        doc.get('mobile'),
+        doc.get('mobileNumber'),
+        doc.get('phone_number'),
+        doc.get('mobile_number'),
+      ];
+      return storedPhones.some((value) => {
+        if (typeof value !== 'string') return false;
+        const stored = normalizeLookupPhone(value);
+        return stored.length >= 7 && stored === queryDigits;
+      });
     });
     if (matches.length === 0) return { found: false };
     if (matches.length > 1) {
