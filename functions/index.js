@@ -826,6 +826,73 @@ exports.revertSettlement = functions.https.onCall(async (data, context) => {
   }
 });
 
+
+// Batch lookup for contacts already stored on the device. Phone values are
+// processed transiently and are never persisted. The response contains only
+// matched UIDs and display names, keyed by the canonical input phone.
+exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to match your contacts.');
+  }
+  const rawPhones = data && data.phoneNumbers;
+  if (!Array.isArray(rawPhones) || rawPhones.length < 1 || rawPhones.length > 100 ||
+      rawPhones.some((phone) => typeof phone !== 'string' || phone.length > 40)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Send between 1 and 100 phone numbers.');
+  }
+
+  const phoneKeys = [...new Set(rawPhones.map(normalizeLookupPhone).filter((phone) => phone.length >= 7 && phone.length <= 15))];
+  if (phoneKeys.length === 0) return { matches: {}, ambiguous: [] };
+
+  const limitRef = db.collection('phoneLookupRateLimits').doc(context.auth.uid);
+  const now = Date.now();
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(limitRef);
+      const prior = snap.exists ? snap.data() : {};
+      const windowStart = Number(prior.windowStart || 0);
+      const count = windowStart > now - 60000 ? Number(prior.count || 0) : 0;
+      if (count >= 20) {
+        throw new functions.https.HttpsError('resource-exhausted', 'Too many contact searches. Please wait a minute and try again.');
+      }
+      tx.set(limitRef, { windowStart: count === 0 ? now : windowStart, count: count + 1 });
+    });
+
+    // MVP fallback for legacy profiles: one collection scan per batch, not one
+    // scan per contact. Replace with indexed normalized fields after backfill.
+    const requested = new Set(phoneKeys);
+    const matchesByPhone = new Map();
+    const ambiguous = new Set();
+    const usersSnap = await db.collection('users').get();
+    for (const doc of usersSnap.docs) {
+      if (doc.id === context.auth.uid) continue;
+      const phone = normalizeLookupPhone(doc.get('phoneNumber'));
+      if (!requested.has(phone)) continue;
+      if (matchesByPhone.has(phone)) {
+        matchesByPhone.delete(phone);
+        ambiguous.add(phone);
+        continue;
+      }
+      if (!ambiguous.has(phone)) {
+        matchesByPhone.set(phone, {
+          uid: doc.id,
+          name: typeof doc.get('name') === 'string' && doc.get('name').trim()
+            ? doc.get('name').trim()
+            : 'Nus·Nus user',
+        });
+      }
+    }
+    const matches = {};
+    for (const [phone, user] of matchesByPhone.entries()) {
+      if (!ambiguous.has(phone)) matches[phone] = user;
+    }
+    return { matches, ambiguous: [...ambiguous] };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('lookupRegisteredUsersByPhones failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not match contacts. Please try again.');
+  }
+});
+
 // Looks up one registered account by the phone number already stored on its
 // profile. Profile documents remain private to clients; this callable returns
 // only the matching account's uid and display name.
