@@ -22,7 +22,7 @@ function normalizeLookupPhone(value) {
       /^[6-9]\d{9}$/.test(digits.slice(2))) {
     return digits.slice(2);
   }
-  if (/^[6-9]\d{9}$/.test(digits)) return digits;
+  if (digits.length === 11 && digits.startsWith('0') && /^[6-9]\\d{9}$/.test(digits.slice(1))) return digits.slice(1);\n  if (/^[6-9]\d{9}$/.test(digits)) return digits;
 
   // UAE local mobile numbers are commonly stored with or without the trunk 0.
   if (/^5\d{8}$/.test(digits)) return '0' + digits;
