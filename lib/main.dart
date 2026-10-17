@@ -26,7 +26,7 @@ Future<void> main() async {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     try {
       await FirebaseAppCheck.instance.activate(
-        androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        providerAndroid: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
       );
     } catch (error) {
       // Keep the app usable for diagnostics; enforced App Check requests will
