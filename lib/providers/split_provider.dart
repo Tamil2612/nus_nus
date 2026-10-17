@@ -794,9 +794,10 @@ class SplitProvider extends ChangeNotifier {
     if (personId == expense.payerId) {
       return; // Cannot toggle/revert the person who paid
     }
-    // A share already reconciled by the trusted pair-settlement flow must not
-    // be changed through the manual paid/pending toggle.
-    if ((expense.settledAmounts[personId] ?? 0) > 0.005) {
+    // Only a fully covered share is locked. If a pair settlement covered
+    // part of this share, its creator may still mark the remainder paid to
+    // forgive it (or undo that manual forgiveness later).
+    if (expense.isShareCoveredByPairSettlement(personId)) {
       return;
     }
 
