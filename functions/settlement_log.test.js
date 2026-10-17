@@ -65,9 +65,10 @@ test('only the two people in the settlement may undo it', () => {
 });
 
 
-test('allocation targets include legacy forward settlements without over-allocating', () => {
-  // Forward 150, reverse 40, legacy forward 20, legacy reverse 0 => net 90.
-  // A full settlement must reconcile all 150 of the real forward shares.
+test('legacy forward settlements are not allocated onto real shares again', () => {
+  // Forward 150, reverse 40, legacy forward 20 => net 90. Paying the full 90
+  // offsets the 40 and settles 130 of the 150 forward; the other 20 is already
+  // covered by the legacy card, which stays in the ledger as a negative entry.
   const targets = settlementAllocationTargets({
     reverseCents: 4000,
     legacyForwardCents: 2000,
@@ -76,7 +77,7 @@ test('allocation targets include legacy forward settlements without over-allocat
   });
   assert.deepEqual(targets, {
     reverseAllocationCents: 4000,
-    forwardTargetCents: 15000,
+    forwardTargetCents: 13000,
   });
 });
 
@@ -89,8 +90,31 @@ test('allocation targets subtract legacy reverse entries only once', () => {
   });
   assert.deepEqual(targets, {
     reverseAllocationCents: 3000,
-    forwardTargetCents: 7000,
+    forwardTargetCents: 6000,
   });
+});
+
+test('ledger invariant: balance after settling is exactly net minus requested', () => {
+  // ledger balance = (forward - fwdAlloc - legacyForward) - (reverse - revAlloc - legacyReverse)
+  const cases = [
+    { F: 10000, R: 0, lf: 3000, lr: 0, pay: 7000 },
+    { F: 10000, R: 4000, lf: 3000, lr: 1000, pay: 4000 },
+    { F: 15000, R: 4000, lf: 2000, lr: 0, pay: 9000 },
+    { F: 15000, R: 4000, lf: 2000, lr: 0, pay: 2500 },
+    { F: 8000, R: 5000, lf: 0, lr: 5000, pay: 3000 },
+  ];
+  for (const c of cases) {
+    const netBefore = c.F - c.R - c.lf + c.lr;
+    const t = settlementAllocationTargets({
+      reverseCents: c.R, legacyForwardCents: c.lf,
+      legacyReverseCents: c.lr, requestedCents: c.pay,
+    });
+    // Allocations must fit inside the real outstanding shares.
+    assert.ok(t.forwardTargetCents <= c.F, 'forward allocation within real shares');
+    assert.ok(t.reverseAllocationCents <= c.R, 'reverse allocation within real shares');
+    const netAfter = (c.F - t.forwardTargetCents - c.lf) - (c.R - t.reverseAllocationCents - c.lr);
+    assert.equal(netAfter, netBefore - c.pay, JSON.stringify(c));
+  }
 });
 
 test('allocation targets reject impossible legacy reverse totals', () => {

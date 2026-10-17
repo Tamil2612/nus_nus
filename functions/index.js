@@ -634,7 +634,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
       if (legacyReverseCents > reverseCents) {
         throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely. Please review the affected groups.');
       }
-      const reverseAllocationCents = reverseCents - legacyReverseCents;
+      const { reverseAllocationCents, forwardTargetCents } = settlementAllocationTargets({ reverseCents, legacyForwardCents, legacyReverseCents, requestedCents });
       if (netCents < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'The debt direction changed. Refresh balances and try again.');
       }

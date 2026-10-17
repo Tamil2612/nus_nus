@@ -38,19 +38,28 @@ function subtractAllocations(currentAmounts, centsByPerson) {
   return { ok: true, next };
 }
 
-// Computes how many cents must be allocated to real expense shares after
-// accounting for legacy settlement cards that remain in the historical ledger.
-// net = forward - reverse - legacyForward + legacyReverse; therefore the
-// forward target must include legacyForward to reconcile the real shares.
+// Computes how many cents must be allocated to real expense shares.
+//
+// Legacy settlement cards stay in the ledger as separate NEGATIVE entries
+// (see SettlementCalculator.deriveLedgerEntries), so they already reduce the
+// balance and must NOT also be allocated onto real shares, or the ledger
+// would overshoot and show the creditor owing the debtor that amount.
+//
+//   net = forward - reverse - legacyForward + legacyReverse
+//
+// Reverse debt covered by legacy cards is skipped; the rest is offset. The
+// forward target is that offset plus the cash actually paid, which leaves
+// the ledger balance at exactly (net - requested).
 function settlementAllocationTargets({ reverseCents, legacyForwardCents, legacyReverseCents, requestedCents }) {
   const values = [reverseCents, legacyForwardCents, legacyReverseCents, requestedCents];
   if (!values.every(Number.isSafeInteger) || values.some((value) => value < 0) ||
       legacyReverseCents > reverseCents) {
     throw new RangeError('Invalid or unreconcilable settlement allocation inputs.');
   }
+  const reverseAllocationCents = reverseCents - legacyReverseCents;
   return {
-    reverseAllocationCents: reverseCents - legacyReverseCents,
-    forwardTargetCents: reverseCents - legacyReverseCents + legacyForwardCents + requestedCents,
+    reverseAllocationCents,
+    forwardTargetCents: reverseAllocationCents + requestedCents,
   };
 }
 
