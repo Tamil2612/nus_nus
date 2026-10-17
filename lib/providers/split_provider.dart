@@ -996,29 +996,54 @@ class SplitProvider extends ChangeNotifier {
   /// this specific group's Balances tab.
   Future<List<String>> settlePairwise(OverallBalance entry) async {
     final errors = <String>[];
-
-    for (final contrib in entry.breakdown) {
-      if (contrib.amount.abs() <= 0.005) continue;
-
-      // Settlement record logic:
-      // If amount > 0 (they owe you), then record that THEY paid YOU.
-      // If amount < 0 (you owe them), then record that YOU paid THEM.
-      final fromId = contrib.amount > 0 ? contrib.counterpartId : contrib.myId;
-      final toId = contrib.amount > 0 ? contrib.myId : contrib.counterpartId;
-
-      final error = await settleUp(
-        fromId,
-        toId,
-        contrib.amount.abs(),
-        groupId: contrib.groupId,
-      );
-      if (error != null) {
-        errors.add('"${contrib.groupName}": $error');
-      }
-      // No manual local-state update needed on success — the Firestore
-      // stream for that group picks up the new expense and rebuilds.
+    final byCurrency = <String, List<GroupContribution>>{};
+    for (final contribution in entry.breakdown) {
+      if (contribution.amount.abs() <= 0.005) continue;
+      byCurrency.putIfAbsent(contribution.currency, () => []).add(contribution);
     }
 
+    // A person may have opposite debts in different groups. Settle each
+    // currency's combined net once, rather than paying every gross group
+    // contribution (which would over-settle the pair).
+    for (final currencyEntry in byCurrency.entries) {
+      final currency = currencyEntry.key;
+      final contributions = currencyEntry.value;
+      final netAmount = entry.currencyBalances[currency] ??
+          contributions.fold<double>(0, (sum, item) => sum + item.amount);
+      final roundedNet = (netAmount.abs() * 100).round() / 100;
+
+      // Positive from the user's perspective means the other person owes the
+      // user; negative means the user owes them. At zero, either direction is
+      // valid for reconciling the opposite debts without an external payment.
+      final direction = netAmount.abs() > 0.005
+          ? netAmount
+          : contributions.first.amount;
+      final groups = contributions.map((contribution) {
+        final fromId = direction > 0
+            ? contribution.counterpartId
+            : contribution.myId;
+        final toId = direction > 0
+            ? contribution.myId
+            : contribution.counterpartId;
+        return <String, dynamic>{
+          'groupId': contribution.groupId,
+          'fromId': fromId,
+          'toId': toId,
+        };
+      }).toList();
+
+      try {
+        await FirestoreRepository.instance.recordCrossGroupPairSettlement(
+          groups: groups,
+          amount: roundedNet,
+        );
+      } on FirebaseFunctionsException catch (error) {
+        errors.add('$currency: ${error.message ?? 'Could not record settlement.'}');
+      } catch (error) {
+        debugPrint('SplitProvider: cross-group settlement failed: $error');
+        errors.add('$currency: Could not record settlement. Refresh and try again.');
+      }
+    }
     return errors;
   }
 
