@@ -44,6 +44,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   final Map<String, Map<String, dynamic>> _registeredContacts = {};
   final Set<String> _ambiguousContactPhones = {};
   bool _matchingContacts = false;
+  String? _contactMatchError;
 
   @override
   void initState() {
@@ -86,11 +87,28 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
         if (key.length >= 7 && key.length <= 15) phoneNumbers.add(raw);
       }
     }
-    if (phoneNumbers.isEmpty) return;
-    // A bounded batch avoids one network call per contact. Manual typed-number
-    // lookup remains available for numbers outside this batch.
+
+    if (phoneNumbers.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _registeredContacts.clear();
+          _ambiguousContactPhones.clear();
+          _matchingContacts = false;
+          _contactMatchError = null;
+        });
+      }
+      return;
+    }
+
+    // Send a bounded batch. The backend compares canonical phone values
+    // against private users/{uid}.phoneNumber fields and returns only matches.
     final batch = phoneNumbers.take(500).toList();
-    if (mounted) setState(() => _matchingContacts = true);
+    if (mounted) {
+      setState(() {
+        _matchingContacts = true;
+        _contactMatchError = null;
+      });
+    }
     try {
       final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
           .httpsCallable('lookupRegisteredUsersByPhones');
@@ -113,13 +131,28 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
           }
         }
         if (rawAmbiguous is List) {
-          _ambiguousContactPhones.addAll(rawAmbiguous.map((item) => item.toString()));
+          _ambiguousContactPhones
+              .addAll(rawAmbiguous.map((item) => item.toString()));
         }
         _matchingContacts = false;
+        _contactMatchError = null;
+      });
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _matchingContacts = false;
+        _contactMatchError = error.code == 'not-found'
+            ? 'Contact matching is not deployed yet. Deploy the latest Cloud Functions and retry.'
+            : 'Could not match contacts. Check your connection and retry.';
       });
     } catch (_) {
-      if (mounted) setState(() => _matchingContacts = false);
-      // Contact browsing still works if matching is unavailable.
+      if (mounted) {
+        setState(() {
+          _matchingContacts = false;
+          _contactMatchError =
+              'Could not match contacts. Check your connection and retry.';
+        });
+      }
     }
   }
 
@@ -178,10 +211,35 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   void _addRegisteredUser() {
     final user = _registeredUser;
     if (user == null) return;
-    if (!context.read<SplitProvider>().isCurrentGroupOwner) return;
-    final name = user['name'] as String? ?? 'Nus·Nus user';
-    context.read<SplitProvider>().addPerson(name, linkedUserId: user['uid'] as String);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added $name if not already a member.')));
+    _addUserToGroup(user);
+  }
+
+  void _addContactUser(Contact contact) {
+    final user = _registeredContactFor(contact);
+    if (user == null) return;
+    _addUserToGroup(user);
+  }
+
+  void _addUserToGroup(Map<String, dynamic> user) {
+    final provider = context.read<SplitProvider>();
+    if (!provider.isCurrentGroupOwner) return;
+    final uid = user['uid'] as String?;
+    if (uid == null || uid.isEmpty) return;
+    final name = (user['name'] as String?)?.trim().isNotEmpty == true
+        ? (user['name'] as String).trim()
+        : 'Nus·Nus user';
+    final alreadyMember =
+        provider.allPeople.any((person) => person.linkedUserId == uid && !person.archived);
+    if (alreadyMember) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$name is already in this group.')),
+      );
+      return;
+    }
+    provider.addPerson(name, linkedUserId: uid);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added $name to the group.')),
+    );
   }
 
   Future<void> _shareTypedInvite() async {
@@ -254,7 +312,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
-    final filtered = _contacts.where(_matchesSearch).toList();
+    final registeredContacts = _contacts.where((contact) => _registeredContactFor(contact) != null).toList();
+    final filtered = registeredContacts.where(_matchesSearch).toList();
 
     return Container(
       height: 0.82.sh,
@@ -368,6 +427,22 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
             ),
           if (_lookupError != null)
             Padding(padding: EdgeInsets.symmetric(horizontal: 20.w), child: Text(_lookupError!, style: TextStyle(color: AppColors.rust, fontSize: 12.sp))),
+          if (_contactMatchError != null)
+            Padding(
+              padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 8.h),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(_contactMatchError!,
+                        style: TextStyle(color: AppColors.rust, fontSize: 11.sp)),
+                  ),
+                  TextButton(
+                    onPressed: _matchingContacts ? null : () => _matchLoadedContacts(_contacts),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
           if (_error != null)
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 20.w),
@@ -491,43 +566,18 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                             color: AppColors.ink,
                             fontWeight: FontWeight.w600,
                             fontSize: 13.5.sp)),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(contact.phones.first.number,
-                            style: TextStyle(
-                                color: AppColors.slate, fontSize: 11.5.sp)),
-                        3.verticalSpace,
-                        if (_registeredContactFor(contact) != null)
-                          Text('On Nus·Nus',
-                              style: TextStyle(
-                                  color: Colors.green.shade700,
-                                  fontSize: 10.5.sp,
-                                  fontWeight: FontWeight.w600))
-                        else if (_hasAmbiguousContactPhone(contact))
-                          Text('Number needs review',
-                              style: TextStyle(
-                                  color: AppColors.rust, fontSize: 10.5.sp))
-                        else if (_matchingContacts)
-                          Text('Checking Nus·Nus…',
-                              style: TextStyle(
-                                  color: AppColors.slate, fontSize: 10.5.sp))
-                        else
-                          Text('Invite to Nus·Nus',
-                              style: TextStyle(
-                                  color: AppColors.slate, fontSize: 10.5.sp)),
-                      ],
+                    subtitle: Text(
+                      contact.phones.first.number,
+                      style: TextStyle(color: AppColors.slate, fontSize: 11.5.sp),
                     ),
-                    trailing: _registeredContactFor(contact) != null
-                        ? Icon(Icons.verified_outlined,
-                            color: Colors.green.shade700, size: 20.r)
-                        : Icon(Icons.search,
-                            color: AppColors.brass, size: 20.r),
-                    onTap: () {
-                      final phone = contact.phones.first.number;
-                      _searchController.text = phone;
-                      _onSearchChanged(phone);
-                    },
+                    trailing: provider.isCurrentGroupOwner
+                        ? Icon(Icons.person_add_alt_1,
+                            color: AppColors.brass, size: 20.r)
+                        : Icon(Icons.verified_outlined,
+                            color: Colors.green.shade700, size: 20.r),
+                    onTap: provider.isCurrentGroupOwner
+                        ? () => _addContactUser(contact)
+                        : null,
                   );
                 },
               ),
@@ -536,8 +586,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
             padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 16.h),
             child: Text(
               provider.isCurrentGroupOwner
-                  ? 'Search a number with or without +971. Matches include existing profiles with unverified numbers.'
-                  : 'Only the group owner can add members. You can still share the app with a contact.',
+                  ? 'Only registered contacts are listed. Search also accepts UAE numbers with or without +971.'
+                  : 'Only the group owner can add members.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.slate, fontSize: 10.5.sp),
             ),
