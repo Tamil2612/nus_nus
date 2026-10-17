@@ -352,7 +352,7 @@ class ExpenseDetailScreen extends StatelessWidget {
                           liveExpense.isPersonPartiallyPaid(person.id);
 
                       return GestureDetector(
-                        onTap: (canToggle && !isPayer)
+                        onTap: canToggleThisShare
                             ? () {
                                 provider.togglePersonSettlement(
                                     liveExpense.id, person.id);
