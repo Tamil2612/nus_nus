@@ -363,15 +363,16 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       }
 
       const expensesSnap = await tx.get(expensesRef);
-      const docs = expensesSnap.docs
-        .filter((doc) => doc.data().isSettlement !== true)
-        .sort((a, b) => {
-          const at = a.data().createdAt && a.data().createdAt.toMillis
-            ? a.data().createdAt.toMillis() : 0;
-          const bt = b.data().createdAt && b.data().createdAt.toMillis
-            ? b.data().createdAt.toMillis() : 0;
-          return at - bt || a.id.localeCompare(b.id);
-        });
+      const docs = expensesSnap.docs.slice().sort((a, b) => {
+        const at = a.data().createdAt && a.data().createdAt.toMillis
+          ? a.data().createdAt.toMillis() : 0;
+        const bt = b.data().createdAt && b.data().createdAt.toMillis
+          ? b.data().createdAt.toMillis() : 0;
+        return at - bt || a.id.localeCompare(b.id);
+      });
+      // Legacy settlement cards remain part of the ledger but must never be
+      // mutated by the new allocator, which only reconciles real expense shares.
+      const expenseDocs = docs.filter((doc) => doc.data().isSettlement !== true);
 
       const outstandingFor = (expense, personId) => {
         const splits = expense.splitMap || {};
@@ -389,13 +390,29 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
 
       let forwardCents = 0;
       let reverseCents = 0;
-      for (const doc of docs) {
+      let legacyForwardCents = 0;
+      let legacyReverseCents = 0;
+      for (const doc of expenseDocs) {
         const expense = doc.data();
         const payerId = Number(expense.payerId);
         if (payerId === toId) forwardCents += outstandingFor(expense, fromId);
         if (payerId === fromId) reverseCents += outstandingFor(expense, toId);
       }
-      const netCents = forwardCents - reverseCents;
+      // Old releases wrote settlement cards as negative ledger entries. Count
+      // them when validating the current net, but do not allocate against them.
+      for (const doc of docs) {
+        const settlement = doc.data();
+        if (settlement.isSettlement !== true) continue;
+        const payerId = Number(settlement.payerId);
+        const splits = settlement.splitMap || {};
+        if (payerId === fromId) {
+          legacyForwardCents += Math.round(Number(splits[String(toId)] ?? splits[toId] ?? 0) * 100);
+        }
+        if (payerId === toId) {
+          legacyReverseCents += Math.round(Number(splits[String(fromId)] ?? splits[fromId] ?? 0) * 100);
+        }
+      }
+      const netCents = forwardCents - reverseCents - legacyForwardCents + legacyReverseCents;
       if (netCents <= 0) {
         throw new functions.https.HttpsError(
           'failed-precondition',
@@ -415,7 +432,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       const writesByPath = new Map();
       const allocate = (payerId, debtorId, centsToAllocate) => {
         let remaining = centsToAllocate;
-        for (const doc of docs) {
+        for (const doc of expenseDocs) {
           if (remaining <= 0) break;
           const expense = doc.data();
           if (Number(expense.payerId) !== payerId) continue;
