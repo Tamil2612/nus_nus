@@ -595,41 +595,8 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
       }
 
       const writesByPath = new Map();
-      const allocate = (payerIdForGroup, debtorIdForGroup, centsToAllocate) => {
-        if (centsToAllocate < 0) {
-          throw new functions.https.HttpsError(
-            'failed-precondition',
-            'Legacy settlement history cannot be reconciled safely. Please review the affected group.'
-          );
-        }
-        let remaining = centsToAllocate;
-        for (const item of snapshots) {
-          for (const doc of item.expenseDocs) {
-            if (remaining <= 0) break;
-            const expense = doc.data();
-            if (Number(expense.payerId) !== payerIdForGroup(item)) continue;
-            const shareCents = outstandingFor(expense, debtorIdForGroup(item));
-            if (shareCents <= 0) continue;
-            const applyCents = Math.min(remaining, shareCents);
-            const priorWrite = writesByPath.get(doc.ref.path);
-            const rawAmounts = priorWrite ? priorWrite.settledAmounts : (expense.settledAmounts || {});
-            const nextAmounts = { ...rawAmounts };
-            const personId = debtorIdForGroup(item);
-            const previousCents = Math.round(Number(rawAmounts[String(personId)] || 0) * 100);
-            nextAmounts[String(personId)] = (previousCents + applyCents) / 100;
-            writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
-            remaining -= applyCents;
-          }
-          if (remaining <= 0) break;
-        }
-        if (remaining > 0) {
-          throw new functions.https.HttpsError('failed-precondition', 'Could not allocate the full settlement to existing expense shares.');
-        }
-      };
-
       // Reconcile opposite debts across all included groups first, then the
       // requested net amount. The direction IDs are consistent per group.
-      const reverseAllocation = (item) => reverseCents;
       // Allocate reverse shares per group; this callback keeps IDs group-local.
       let reverseRemaining = reverseCents;
       for (const item of snapshots) {
