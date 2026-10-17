@@ -26,6 +26,7 @@ test('normalizes Indian mobile formats with or without +91', () => {
   const expected = '9876543210';
   for (const input of [
     '9876543210',
+    '09876543210',
     '+919876543210',
     '+91 98765 43210',
     '919876543210',
