@@ -36,7 +36,22 @@ class SettlementCalculator {
   static List<LedgerEntry> deriveLedgerEntries(List<Expense> expenses) {
     final entries = <LedgerEntry>[];
     for (final e in expenses) {
-      if (e.isSettlement) continue; // Ignore legacy settlement cards; settlements are tracked via settledBy on split expenses.
+      if (e.isSettlement) {
+        // Older app versions recorded settlements as their own expense-shaped
+        // documents: payerId is the debtor and splitMap holds creditor -> amount.
+        // Keep those historical payments in the ledger as negative debt entries.
+        e.splitMap.forEach((creditorId, amount) {
+          if (creditorId == e.payerId || amount <= 0.005) return;
+          entries.add(LedgerEntry(
+            expenseId: e.id,
+            fromId: e.payerId,
+            toId: creditorId,
+            amount: -amount,
+            isSettlement: true,
+          ));
+        });
+        continue;
+      }
       e.splitMap.forEach((personId, share) {
         if (personId == e.payerId) return; // payer never owes themselves
         // Whole-share flags remain supported for older records. Pairwise
