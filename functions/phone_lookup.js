@@ -17,12 +17,17 @@ function normalizeLookupPhone(value) {
     return national.startsWith('0') ? national : '0' + national;
   }
 
-  // India: compare the 10-digit national mobile number regardless of +91.
+  // India: compare the 10-digit national mobile number regardless of +91
+  // or a legacy local trunk prefix 0.
   if (digits.startsWith('91') && digits.length === 12 &&
       /^[6-9]\d{9}$/.test(digits.slice(2))) {
     return digits.slice(2);
   }
-  if (digits.length === 11 && digits.startsWith('0') && /^[6-9]\\d{9}$/.test(digits.slice(1))) return digits.slice(1);\n  if (/^[6-9]\d{9}$/.test(digits)) return digits;
+  if (digits.length === 11 && digits.startsWith('0') &&
+      /^[6-9]\d{9}$/.test(digits.slice(1))) {
+    return digits.slice(1);
+  }
+  if (/^[6-9]\d{9}$/.test(digits)) return digits;
 
   // UAE local mobile numbers are commonly stored with or without the trunk 0.
   if (/^5\d{8}$/.test(digits)) return '0' + digits;
