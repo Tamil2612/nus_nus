@@ -824,3 +824,69 @@ exports.revertSettlement = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', 'Could not undo the settlement. Refresh and try again.');
   }
 });
+
+// Looks up one registered account by the phone number already stored on its
+// profile. Profile documents remain private to clients; this callable returns
+// only the matching account's uid and display name.
+function normalizeLookupPhone(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  // Treat common UAE local (+971 5x...) and domestic (05x...) formats alike.
+  if (digits.startsWith('971') && digits.length === 12) digits = '0' + digits.slice(3);
+  return digits;
+}
+
+exports.lookupRegisteredUserByPhone = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to search registered users.');
+  }
+  const rawPhone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
+  const queryDigits = normalizeLookupPhone(rawPhone);
+  if (queryDigits.length < 7 || queryDigits.length > 15) {
+    throw new functions.https.HttpsError('invalid-argument', 'Enter at least 7 digits for a phone number.');
+  }
+
+  // Basic per-account rate limit: at most 20 lookup attempts per rolling minute.
+  const limitRef = db.collection('phoneLookupRateLimits').doc(context.auth.uid);
+  const now = Date.now();
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(limitRef);
+      const prior = snap.exists ? snap.data() : {};
+      const windowStart = Number(prior.windowStart || 0);
+      const count = windowStart > now - 60000 ? Number(prior.count || 0) : 0;
+      if (count >= 20) {
+        throw new functions.https.HttpsError('resource-exhausted', 'Too many searches. Please wait a minute and try again.');
+      }
+      tx.set(limitRef, { windowStart: count === 0 ? now : windowStart, count: count + 1 });
+    });
+
+    // Existing profile phoneNumber values are used as requested, even if not
+    // verified. Do not expose other profiles or return phone/email to clients.
+    const usersSnap = await db.collection('users').get();
+    const matches = usersSnap.docs.filter((doc) => {
+      if (doc.id === context.auth.uid) return false;
+      const stored = normalizeLookupPhone(doc.get('phoneNumber'));
+      return stored.length >= 7 && stored === queryDigits;
+    });
+    if (matches.length === 0) return { found: false };
+    if (matches.length > 1) {
+      // Ambiguous legacy data must not cause the wrong account to be added.
+      return { found: false, ambiguous: true };
+    }
+    const match = matches[0];
+    return {
+      found: true,
+      user: {
+        uid: match.id,
+        name: typeof match.get('name') === 'string' && match.get('name').trim()
+          ? match.get('name').trim()
+          : 'Nus·Nus user',
+      },
+    };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('lookupRegisteredUserByPhone failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not search registered users. Please try again.');
+  }
+});
