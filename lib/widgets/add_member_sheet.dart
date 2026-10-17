@@ -82,7 +82,10 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     }
     if (digits.length == 11 &&
         digits.startsWith('0') &&
-        RegExp(r'^[6-9]\d{9}
+        RegExp(r'^[6-9]\d{9}$').hasMatch(digits.substring(1))) {
+      return digits.substring(1);
+    }
+    if (RegExp(r'^[6-9]\d{9}$').hasMatch(digits)) return digits;
     if (digits.length == 9 && digits.startsWith('5')) return '0$digits';
     return digits;
   }
