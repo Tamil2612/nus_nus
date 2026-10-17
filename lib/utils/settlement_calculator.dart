@@ -11,10 +11,10 @@ import '../models/transfer.dart';
 ///   Expenses  →  LedgerEntry list  →  PairBalance list  →  net balances  →  optimized Settlement
 ///
 /// Every stage is a pure function of the one before it — nothing here is
-/// stored. Editing or deleting an expense just changes the input list and
-/// the whole pipeline recomputes; past expenses are never mutated to
-/// "absorb" a settlement, which is what keeps the debtor-creditor history
-/// (item 3 of the spec) honest.
+/// stored. Editing or deleting an expense changes the input list and the
+/// pipeline recomputes. A recorded pair settlement may update only the
+/// expense's settlement-allocation metadata; its original amount, payer and
+/// split remain intact, and no synthetic payment expense is created.
 class SettlementCalculator {
   SettlementCalculator._();
 
