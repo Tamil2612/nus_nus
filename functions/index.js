@@ -865,8 +865,37 @@ exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, cont
     const usersSnap = await db.collection('users').get();
     for (const doc of usersSnap.docs) {
       if (doc.id === context.auth.uid) continue;
-      const phone = normalizeLookupPhone(doc.get('phoneNumber'));
-      if (!requested.has(phone)) continue;
+      // Read the current field plus legacy aliases used by older profile
+      // versions. Normalize each value before comparing; never return the
+      // stored phone number to the client.
+      const storedPhones = [
+        doc.get('phoneNumber'),
+        doc.get('phone'),
+        doc.get('mobile'),
+        doc.get('mobileNumber'),
+        doc.get('phone_number'),
+        doc.get('mobile_number'),
+      ].filter((value) => typeof value === 'string' && value.trim().length > 0);
+      const matchingPhones = [...new Set(storedPhones.map(normalizeLookupPhone)
+        .filter((phone) => requested.has(phone)))];
+      if (matchingPhones.length === 0) continue;
+      // If a profile contains multiple phone fields matching different contact
+      // entries, mark each canonical phone as ambiguous rather than linking
+      // the wrong person.
+      for (const phone of matchingPhones) {
+        if (matchesByPhone.has(phone)) {
+          matchesByPhone.delete(phone);
+          ambiguous.add(phone);
+        } else if (!ambiguous.has(phone)) {
+          matchesByPhone.set(phone, {
+            uid: doc.id,
+            name: typeof doc.get('name') === 'string' && doc.get('name').trim()
+              ? doc.get('name').trim()
+              : 'Nus·Nus user',
+          });
+        }
+      }
+      continue;
       if (matchesByPhone.has(phone)) {
         matchesByPhone.delete(phone);
         ambiguous.add(phone);
