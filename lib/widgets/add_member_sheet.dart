@@ -40,6 +40,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   String? _lookupError;
   Map<String, dynamic>? _registeredUser;
   bool _ambiguousMatch = false;
+  int _lookupSequence = 0;
 
   @override
   void dispose() {
@@ -54,6 +55,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     setState(() {
       _query = value.trim().toLowerCase();
       _lookupDebounce?.cancel();
+      _lookupSequence++;
       _registeredUser = null;
       _lookupError = null;
       _lookupAttempted = false;
@@ -61,18 +63,19 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       _lookupLoading = false;
     });
     if (_digitsOnly(value).length < 7) return;
-    _lookupDebounce = Timer(const Duration(milliseconds: 450), () {
-      _lookupRegisteredUser(value);
+    final sequence = _lookupSequence;
+    _lookupDebounce = Timer(const Duration(milliseconds: 400), () {
+      _lookupRegisteredUser(value, sequence);
     });
   }
 
-  Future<void> _lookupRegisteredUser(String phoneNumber) async {
+  Future<void> _lookupRegisteredUser(String phoneNumber, int sequence) async {
     if (!mounted) return;
     setState(() { _lookupLoading = true; _lookupError = null; });
     try {
       final callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('lookupRegisteredUserByPhone');
       final response = await callable.call(<String, dynamic>{'phoneNumber': phoneNumber});
-      if (!mounted) return;
+      if (!mounted || sequence != _lookupSequence) return;
       final data = Map<String, dynamic>.from(response.data as Map);
       setState(() {
         _lookupLoading = false;
@@ -81,10 +84,10 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
         _registeredUser = data['found'] == true && data['user'] is Map ? Map<String, dynamic>.from(data['user'] as Map) : null;
       });
     } on FirebaseFunctionsException catch (error) {
-      if (!mounted) return;
+      if (!mounted || sequence != _lookupSequence) return;
       setState(() { _lookupLoading = false; _lookupError = error.code == 'resource-exhausted' ? 'Too many searches. Wait a minute and try again.' : 'Could not search registered users. Please try again.'; });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || sequence != _lookupSequence) return;
       setState(() { _lookupLoading = false; _lookupError = 'Could not search registered users. Please try again.'; });
     }
   }
@@ -248,7 +251,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
               onChanged: _onSearchChanged,
               style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
               decoration: InputDecoration(
-                hintText: 'Search registered users by phone number',
+                hintText: 'Search by name or phone number',
                 hintStyle: const TextStyle(color: AppColors.slate),
                 prefixIcon: const Icon(Icons.search, color: AppColors.slate),
                 suffixIcon: _query.isEmpty
@@ -257,6 +260,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                         tooltip: 'Clear search',
                         onPressed: () {
                           _lookupDebounce?.cancel();
+                          _lookupSequence++;
                           _searchController.clear();
                           setState(() {
                             _query = '';
@@ -423,9 +427,13 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                     subtitle: Text(contact.phones.first.number,
                         style: TextStyle(
                             color: AppColors.slate, fontSize: 11.5.sp)),
-                    trailing: Icon(Icons.share_outlined,
+                    trailing: Icon(Icons.search,
                         color: AppColors.brass, size: 20.r),
-                    onTap: () => _shareInvite(contact),
+                    onTap: () {
+                      final phone = contact.phones.first.number;
+                      _searchController.text = phone;
+                      _onSearchChanged(phone);
+                    },
                   );
                 },
               ),
@@ -434,7 +442,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
             padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 16.h),
             child: Text(
               provider.isCurrentGroupOwner
-                  ? 'Phone numbers are matched against existing account profiles; a match does not verify ownership of that number.'
+                  ? 'Search a number with or without +971. Matches include existing profiles with unverified numbers.'
                   : 'Only the group owner can add members. You can still share the app with a contact.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.slate, fontSize: 10.5.sp),
