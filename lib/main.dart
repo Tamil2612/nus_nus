@@ -1,4 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
@@ -15,6 +17,20 @@ Future<void> main() async {
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Install App Check before any Firebase callable requests are made.
+  // Debug builds use the debug provider; register its token in Firebase
+  // Console > App Check > Manage debug tokens. Release Android builds use
+  // Play Integrity.
+  await FirebaseAppCheck.instance.activate(
+    providerWeb: ReCaptchaV3Provider('6LdDD20tAAAAAOzELBUSgYE3PKsBdzKprh8gJ5rv'),
+    providerAndroid: kDebugMode
+        ? const AndroidDebugProvider()
+        : const AndroidPlayIntegrityProvider(),
+    providerApple: kDebugMode
+        ? const AppleDebugProvider()
+        : const AppleDeviceCheckProvider(), // Or const AppleAppAttestWithDeviceCheckFallbackProvider()
   );
 
   // Lets notification taps open the right expense, and shows an in-app banner

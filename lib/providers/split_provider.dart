@@ -1056,9 +1056,12 @@ class SplitProvider extends ChangeNotifier {
           amount: roundedNet,
         );
       } on FirebaseFunctionsException catch (error) {
-        errors.add('$currency: ${error.message ?? 'Could not record settlement.'}');
-      } catch (error) {
-        debugPrint('SplitProvider: cross-group settlement failed: $error');
+        debugPrint('SplitProvider: cross-group settlement failed; '
+            'code=${error.code}, message=${error.message}, details=${error.details}');
+        errors.add('$currency: ${error.message ?? 'Could not record settlement.'} '
+            '(code: ${error.code})');
+      } catch (error, stackTrace) {
+        debugPrint('SplitProvider: cross-group settlement failed: $error\n$stackTrace');
         errors.add('$currency: Could not record settlement. Refresh and try again.');
       }
     }
