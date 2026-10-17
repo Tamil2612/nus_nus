@@ -1,10 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Public profile directory. Push tokens live in users/{uid}/private/push.
+    // Profile documents may contain email and phone metadata. They are private:
+    // clients may only read their own profile. Contact matching must go through
+    // a trusted, rate-limited backend after phone verification is implemented.
+    // Push tokens live in users/{uid}/private/push.
     match /users/{uid} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
+      allow read, create, update, delete: if request.auth != null && request.auth.uid == uid;
 
       match /private/{document=**} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
