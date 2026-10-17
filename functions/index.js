@@ -358,9 +358,9 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       const people = Array.isArray(group.members) ? group.members : [];
       const fromPerson = people.find((p) => Number(p.id) === fromId);
       const toPerson = people.find((p) => Number(p.id) === toId);
-      if (!fromPerson || !toPerson ||
-          (fromPerson.linkedUserId !== context.auth.uid &&
-           toPerson.linkedUserId !== context.auth.uid)) {
+      const fromIsMe = !!fromPerson && fromPerson.linkedUserId === context.auth.uid;
+      const toIsMe = !!toPerson && toPerson.linkedUserId === context.auth.uid;
+      if (!fromPerson || !toPerson || fromIsMe === toIsMe) {
         throw new functions.https.HttpsError(
           'permission-denied',
           'Only one of the two people in this debt can confirm it.'
