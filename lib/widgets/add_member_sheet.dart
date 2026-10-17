@@ -101,17 +101,28 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     }
   }
 
+  String _normaliseText(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp('\\s+'), ' ');
+
+  String _digitsOnly(String value) => value.replaceAll(RegExp('[^0-9]'), '');
+
+  bool _matchesSearch(Contact contact) {
+    final query = _normaliseText(_query);
+    if (query.isEmpty) return true;
+    if (_normaliseText(contact.displayName).contains(query)) return true;
+
+    // Ignore spaces, +, brackets and hyphens when searching phone numbers.
+    final queryDigits = _digitsOnly(query);
+    if (queryDigits.isEmpty) return false;
+    return contact.phones.any(
+      (phone) => _digitsOnly(phone.number).contains(queryDigits),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
-    final filtered = _contacts.where((contact) {
-      final name = contact.displayName.toLowerCase();
-      final numbers =
-          contact.phones.map((p) => p.number.toLowerCase()).join(' ');
-      return _query.isEmpty ||
-          name.contains(_query) ||
-          numbers.contains(_query);
-    }).toList();
+    final filtered = _contacts.where(_matchesSearch).toList();
 
     return Container(
       height: 0.82.sh,
@@ -177,6 +188,16 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                 hintText: 'Search contacts by name or number',
                 hintStyle: const TextStyle(color: AppColors.slate),
                 prefixIcon: const Icon(Icons.search, color: AppColors.slate),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                        icon: const Icon(Icons.close, color: AppColors.slate),
+                      ),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: .55),
                 border: OutlineInputBorder(
