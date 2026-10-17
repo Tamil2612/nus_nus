@@ -478,7 +478,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // user's actual settlement amount to the forward debt. This preserves
       // the net balance after partial settlements and avoids fake payments.
       allocate(fromId, toId, reverseAllocationCents);
-      allocate(toId, fromId, reverseAllocationCents + requestedCents);
+      allocate(toId, fromId, reverseAllocationCents + legacyForwardCents + requestedCents);
       const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
@@ -671,7 +671,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError('failed-precondition', 'Could not reconcile all opposing debts safely.');
       }
 
-      const forwardTarget = reverseAllocationCents + requestedCents;
+      const forwardTarget = reverseAllocationCents + legacyForwardCents + requestedCents;
       if (forwardTarget < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely.');
       }
