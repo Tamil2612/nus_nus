@@ -527,11 +527,15 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
         const people = Array.isArray(group.members) ? group.members : [];
         const fromPerson = people.find((p) => Number(p.id) === item.fromId);
         const toPerson = people.find((p) => Number(p.id) === item.toId);
-        if (!fromPerson || !toPerson ||
-            (fromPerson.linkedUserId !== context.auth.uid &&
-             toPerson.linkedUserId !== context.auth.uid)) {
-          throw new functions.https.HttpsError('permission-denied', 'Only one of the two people in this debt can confirm it.');
+        const fromIsMe = !!fromPerson && fromPerson.linkedUserId === context.auth.uid;
+        const toIsMe = !!toPerson && toPerson.linkedUserId === context.auth.uid;
+        if (!fromPerson || !toPerson || fromIsMe === toIsMe) {
+          throw new functions.https.HttpsError('permission-denied', 'The authenticated user must be exactly one side of each pair.');
         }
+        const counterpart = fromIsMe ? toPerson : fromPerson;
+        const counterpartKey = counterpart.linkedUserId
+          ? 'uid:' + counterpart.linkedUserId
+          : 'name:' + String(counterpart.name || '').trim().toLowerCase();
         const expensesRef = groupRef.collection('expenses');
         const expensesSnap = await tx.get(expensesRef);
         const docs = expensesSnap.docs.slice().sort((a, b) => {
@@ -539,7 +543,12 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
           const bt = b.data().createdAt && b.data().createdAt.toMillis ? b.data().createdAt.toMillis() : 0;
           return at - bt || a.id.localeCompare(b.id);
         });
-        snapshots.push({ ...item, group, docs, expenseDocs: docs.filter((doc) => doc.data().isSettlement !== true) });
+        snapshots.push({ ...item, group, docs, expenseDocs: docs.filter((doc) => doc.data().isSettlement !== true), counterpartKey, fromIsMe });
+      }
+      const expectedCounterpart = snapshots[0].counterpartKey;
+      const expectedDirection = snapshots[0].fromIsMe;
+      if (snapshots.some((item) => item.counterpartKey !== expectedCounterpart || item.fromIsMe !== expectedDirection)) {
+        throw new functions.https.HttpsError('invalid-argument', 'All groups must refer to the same person and settlement direction.');
       }
 
       const outstandingFor = (expense, personId) => {
