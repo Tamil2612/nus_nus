@@ -2,10 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/app_user.dart';
 
-/// Reads the public directory of registered accounts — the `users/{uid}`
-/// profile documents (name/email only). Every signed-in user can read this
-/// collection (see firestore.rules); it never touches anyone's private
-/// touches anyone's private `appState` subcollection.
+/// Reads the signed-in user's private profile. User documents are no longer
+/// a public directory; contact matching must use a trusted lookup once phone
+/// verification is implemented.
 class MemberDirectoryRepository {
   MemberDirectoryRepository._();
   static final MemberDirectoryRepository instance =
