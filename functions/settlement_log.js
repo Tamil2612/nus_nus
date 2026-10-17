@@ -38,6 +38,22 @@ function subtractAllocations(currentAmounts, centsByPerson) {
   return { ok: true, next };
 }
 
+// Computes how many cents must be allocated to real expense shares after
+// accounting for legacy settlement cards that remain in the historical ledger.
+// net = forward - reverse - legacyForward + legacyReverse; therefore the
+// forward target must include legacyForward to reconcile the real shares.
+function settlementAllocationTargets({ reverseCents, legacyForwardCents, legacyReverseCents, requestedCents }) {
+  const values = [reverseCents, legacyForwardCents, legacyReverseCents, requestedCents];
+  if (!values.every(Number.isSafeInteger) || values.some((value) => value < 0) ||
+      legacyReverseCents > reverseCents) {
+    throw new RangeError('Invalid or unreconcilable settlement allocation inputs.');
+  }
+  return {
+    reverseAllocationCents: reverseCents - legacyReverseCents,
+    forwardTargetCents: reverseCents - legacyReverseCents + legacyForwardCents + requestedCents,
+  };
+}
+
 // Either person in the debtor/creditor pair may undo a settlement.
 function canRevert(log, uid) {
   if (!log || !uid) return false;
@@ -45,4 +61,4 @@ function canRevert(log, uid) {
   return uids.includes(uid);
 }
 
-module.exports = { groupAllocationsByExpense, subtractAllocations, canRevert };
+module.exports = { groupAllocationsByExpense, subtractAllocations, canRevert, settlementAllocationTargets };

@@ -6,6 +6,7 @@ const {
   groupAllocationsByExpense,
   subtractAllocations,
   canRevert,
+  settlementAllocationTargets,
 } = require('./settlement_log');
 
 test('groups allocations per expense and person, ignoring junk entries', () => {
@@ -61,4 +62,42 @@ test('only the two people in the settlement may undo it', () => {
   assert.equal(canRevert(log, ''), false);
   assert.equal(canRevert({}, 'debtor'), false);
   assert.equal(canRevert(null, 'debtor'), false);
+});
+
+
+test('allocation targets include legacy forward settlements without over-allocating', () => {
+  // Forward 150, reverse 40, legacy forward 20, legacy reverse 0 => net 90.
+  // A full settlement must reconcile all 150 of the real forward shares.
+  const targets = settlementAllocationTargets({
+    reverseCents: 4000,
+    legacyForwardCents: 2000,
+    legacyReverseCents: 0,
+    requestedCents: 9000,
+  });
+  assert.deepEqual(targets, {
+    reverseAllocationCents: 4000,
+    forwardTargetCents: 15000,
+  });
+});
+
+test('allocation targets subtract legacy reverse entries only once', () => {
+  const targets = settlementAllocationTargets({
+    reverseCents: 5000,
+    legacyForwardCents: 1000,
+    legacyReverseCents: 2000,
+    requestedCents: 3000,
+  });
+  assert.deepEqual(targets, {
+    reverseAllocationCents: 3000,
+    forwardTargetCents: 7000,
+  });
+});
+
+test('allocation targets reject impossible legacy reverse totals', () => {
+  assert.throws(() => settlementAllocationTargets({
+    reverseCents: 100,
+    legacyForwardCents: 0,
+    legacyReverseCents: 200,
+    requestedCents: 0,
+  }), RangeError);
 });
