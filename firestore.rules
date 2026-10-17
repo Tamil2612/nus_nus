@@ -92,10 +92,8 @@ service cloud.firestore {
           request.resource.data.text != resource.data.text &&
           request.resource.data.isEdited == true;
 
-        // A settlement allocation must be undone before deleting its source expense.
-        allow delete: if isGroupMember() &&
-          request.auth.uid == resource.data.addedBy &&
-          resource.data.get('settledAmounts', {}).size() == 0;
+        allow delete: if chatGroupMember() &&
+          (request.auth.uid == resource.data.senderUid || isGroupOwner());
       }
 
       match /expenses/{expenseId} {
