@@ -474,7 +474,10 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // user's actual settlement amount to the forward debt. This preserves
       // the net balance after partial settlements and avoids fake payments.
       allocate(fromId, toId, reverseCents);
-      allocate(toId, fromId, reverseCents + requestedCents);
+      // Legacy settlement cards already reduce the ledger balance but do not
+      // have mutable share allocations. Account for them when choosing how much
+      // of the remaining real expense shares this new settlement must cover.
+      allocate(toId, fromId, reverseCents + requestedCents + legacyForwardCents - legacyReverseCents);
       const writes = [...writesByPath.values()];
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
@@ -663,7 +666,10 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError('failed-precondition', 'Could not reconcile all opposing debts safely.');
       }
 
-      const forwardTarget = reverseCents + requestedCents;
+      // Existing legacy settlement cards affect the net balance but are not
+      // eligible for allocation/undo. Account for their historical effect when
+      // deciding how much remaining real expense debt this settlement covers.
+      const forwardTarget = reverseCents + requestedCents + legacyForwardCents - legacyReverseCents;
       if (forwardTarget < 0) {
         throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement history cannot be reconciled safely.');
       }
