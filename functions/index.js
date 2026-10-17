@@ -18,6 +18,7 @@ const genAI = new GoogleGenerativeAI(apiKey);
 
 // Firestore instance
 const db = admin.firestore();
+const { normalizeLookupPhone } = require('./phone_lookup');
 
 // Gemini AI Service Function
 exports.parseBillWithAI = functions.https.onCall(async (data, context) => {
@@ -828,14 +829,6 @@ exports.revertSettlement = functions.https.onCall(async (data, context) => {
 // Looks up one registered account by the phone number already stored on its
 // profile. Profile documents remain private to clients; this callable returns
 // only the matching account's uid and display name.
-function normalizeLookupPhone(value) {
-  let digits = String(value || '').replace(/\D/g, '');
-  if (digits.startsWith('00')) digits = digits.slice(2);
-  // Treat common UAE local (+971 5x...) and domestic (05x...) formats alike.
-  if (digits.startsWith('971') && digits.length === 12) digits = '0' + digits.slice(3);
-  return digits;
-}
-
 exports.lookupRegisteredUserByPhone = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to search registered users.');
