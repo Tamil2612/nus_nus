@@ -57,6 +57,23 @@ function messageRef(context, id = 'm1') {
   return doc(context.firestore(), 'groups/g1/messages', id);
 }
 
+test('user profiles are private to their owner', async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users/member-a'), {
+      name: 'Member A',
+      email: 'member-a@example.test',
+      phoneNumber: '+971500000000',
+    });
+  });
+  const owner = env.authenticatedContext('member-a');
+  const other = env.authenticatedContext('member-b');
+  const outsider = env.authenticatedContext('outsider');
+  await assertSucceeds(getDoc(doc(owner.firestore(), 'users/member-a')));
+  await assertFails(getDoc(doc(other.firestore(), 'users/member-a')));
+  await assertFails(getDoc(doc(outsider.firestore(), 'users/member-a')));
+  await assertFails(getDoc(doc(outsider.firestore(), 'users/member-a/private/push')));
+});
+
 test('only group members can read and create messages', async () => {
   const member = env.authenticatedContext('member-a');
   const outsider = env.authenticatedContext('outsider');
