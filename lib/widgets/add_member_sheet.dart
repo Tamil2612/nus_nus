@@ -48,11 +48,13 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     try {
       final granted = await FlutterContacts.requestPermission(readonly: true);
       if (!granted) {
-        if (mounted) setState(() {
-          _permissionDenied = true;
-          _loading = false;
-          _loaded = true;
-        });
+        if (mounted) {
+          setState(() {
+            _permissionDenied = true;
+            _loading = false;
+            _loaded = true;
+          });
+        }
         return;
       }
       final contacts = await FlutterContacts.getContacts(
@@ -61,17 +63,22 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       );
       contacts.sort((a, b) =>
           a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
-      if (mounted) setState(() {
-        _contacts = contacts.where((c) => c.phones.isNotEmpty).toList();
-        _loading = false;
-        _loaded = true;
-      });
+      if (mounted) {
+        setState(() {
+          _contacts = contacts.where((c) => c.phones.isNotEmpty).toList();
+          _loading = false;
+          _loaded = true;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() {
-        _error = 'Could not read contacts. You can still share an invitation.';
-        _loading = false;
-        _loaded = true;
-      });
+      if (mounted) {
+        setState(() {
+          _error =
+              'Could not read contacts. You can still share an invitation.';
+          _loading = false;
+          _loaded = true;
+        });
+      }
     }
   }
 
@@ -99,13 +106,17 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     final provider = context.watch<SplitProvider>();
     final filtered = _contacts.where((contact) {
       final name = contact.displayName.toLowerCase();
-      final numbers = contact.phones.map((p) => p.number.toLowerCase()).join(' ');
-      return _query.isEmpty || name.contains(_query) || numbers.contains(_query);
+      final numbers =
+          contact.phones.map((p) => p.number.toLowerCase()).join(' ');
+      return _query.isEmpty ||
+          name.contains(_query) ||
+          numbers.contains(_query);
     }).toList();
 
     return Container(
       height: 0.82.sh,
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       decoration: BoxDecoration(
         color: AppColors.paper,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24.r)),
@@ -207,7 +218,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                       Text(
                         'Allow contact access to choose someone. Your address book is not uploaded.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.slate, fontSize: 12.sp),
+                        style:
+                            TextStyle(color: AppColors.slate, fontSize: 12.sp),
                       ),
                       12.verticalSpace,
                       OutlinedButton(
@@ -239,7 +251,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                       Text(
                         'Only the contact you choose is used. Nus·Nus will not upload your address book.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.slate, fontSize: 12.sp),
+                        style:
+                            TextStyle(color: AppColors.slate, fontSize: 12.sp),
                       ),
                       14.verticalSpace,
                       ElevatedButton.icon(
@@ -282,7 +295,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                       child: Text(
                         contact.displayName.isEmpty
                             ? '?'
-                            : contact.displayName.characters.first.toUpperCase(),
+                            : contact.displayName.characters.first
+                                .toUpperCase(),
                         style: const TextStyle(
                             color: AppColors.brassSoft,
                             fontWeight: FontWeight.bold),
