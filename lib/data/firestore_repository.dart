@@ -126,7 +126,15 @@ class FirestoreRepository {
   /// from changing trusted pair-settlement allocation metadata.
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
-      await _expensesCol(groupId).doc(expense.id).set(expense.toJson());
+      // update() with only the editable fields, never set(): set() would
+      // resend createdAt (a not-yet-synced serverTimestamp placeholder fails
+      // the "createdAt unchanged" rule) and a possibly stale settledAmounts
+      // (rejected by the rules if a settlement was just recorded).
+      final fields = expense.toJson()
+        ..remove('createdAt') // immutable
+        ..remove('addedBy') // immutable
+        ..remove('settledAmounts'); // written only by the settlement callables
+      await _expensesCol(groupId).doc(expense.id).update(fields);
     } catch (e, st) {
       debugPrint('FirestoreRepository.updateExpense failed: $e\n$st');
       rethrow;
@@ -217,8 +225,8 @@ class FirestoreRepository {
         .limit(50)
         .snapshots()
         .map((snap) => snap.docs
-            .map((doc) => SettlementRecord.fromDoc(groupId, doc))
-            .toList());
+        .map((doc) => SettlementRecord.fromDoc(groupId, doc))
+        .toList());
   }
 
   /// Undoes a recorded settlement (and the rest of its cross-group batch)
