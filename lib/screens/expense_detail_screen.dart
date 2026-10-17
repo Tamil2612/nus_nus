@@ -347,9 +347,14 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final isPayer = person.id == liveExpense.payerId;
                       final share = liveExpense.splitMap[person.id] ?? 0;
                       final isMe = person.linkedUserId == provider.uid;
+                      final pairSettledAmount =
+                          liveExpense.settledAmounts[person.id] ?? 0;
+                      final settledViaPair = pairSettledAmount > 0.005;
                       final isSettled = liveExpense.isPersonPaid(person.id);
                       final isPartial =
                           liveExpense.isPersonPartiallyPaid(person.id);
+                      final canToggleThisShare = canToggle &&
+                          !isPayer && !settledViaPair;
 
                       return GestureDetector(
                         onTap: canToggleThisShare
@@ -452,13 +457,15 @@ class ExpenseDetailScreen extends StatelessWidget {
                                         fontWeight: FontWeight.w900,
                                         color: AppColors.ink),
                                   ),
-                                  if (canToggle && !isPayer)
+                                  if (settledViaPair || canToggleThisShare)
                                     Padding(
                                       padding: EdgeInsets.only(top: 4.h),
                                       child: Text(
-                                        isSettled
-                                            ? 'Tap to mark pending'
-                                            : 'Tap to mark paid',
+                                        settledViaPair
+                                            ? 'Pair settlement applied'
+                                            : (isSettled
+                                                ? 'Tap to mark pending'
+                                                : 'Tap to mark paid'),
                                         style: TextStyle(
                                           fontSize: 8.sp,
                                           color: AppColors.slate,
