@@ -146,6 +146,10 @@ service cloud.firestore {
             // Only the trusted callable may change pair-settlement allocations.
             // Expense authors must not be able to erase or forge recorded settlements.
             request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) &&
+            // Once any pair settlement has been allocated, changing the share
+            // amounts would invalidate that trusted reconciliation.
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['splitMap', 'amount']) ||
+              resource.data.get('settledAmounts', {}).size() == 0) &&
             request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
             request.resource.data.amount <= 100000000 &&
