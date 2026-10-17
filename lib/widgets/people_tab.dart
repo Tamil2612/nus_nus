@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../utils/currency_formatter.dart';
+import 'app_loading_overlay.dart';
 
 /// Shows exactly where the *signed-in user* personally stands — never
 /// anyone else's balance with anyone else — combined across every group
@@ -161,25 +162,44 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
 
   Future<void> _onSettleAll(SplitProvider provider) async {
     setState(() => _isSettling = true);
-    final errors = await provider.settlePairwise(widget.entry);
-    if (!mounted) return;
-    setState(() => _isSettling = false);
+    AppLoadingOverlay.show('Recording settlements…');
+    try {
+      final errors = await provider.settlePairwise(widget.entry);
+      if (!mounted) return;
 
-    if (errors.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Some settlements failed: ${errors.first}'),
-          backgroundColor: AppColors.rust,
-        ),
-      );
-    } else {
+      if (errors.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Some settlements failed: ${errors.first}'),
+            backgroundColor: AppColors.rust,
+            behavior: SnackBarBehavior.fixed,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All dues settled with this person!'),
+            backgroundColor: AppColors.sage,
+            behavior: SnackBarBehavior.fixed,
+          ),
+        );
+        setState(() => _expanded = false);
+      }
+    } catch (e) {
+      debugPrint('PeopleTab: settlePairwise failed: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('All dues settled with this person!'),
-          backgroundColor: AppColors.sage,
+          content: Text('Could not record settlement. Please try again.'),
+          backgroundColor: AppColors.rust,
+          behavior: SnackBarBehavior.fixed,
         ),
       );
-      setState(() => _expanded = false);
+    } finally {
+      AppLoadingOverlay.hide();
+      if (mounted) {
+        setState(() => _isSettling = false);
+      }
     }
   }
 
@@ -311,7 +331,14 @@ class _ExpandablePairwiseCardState extends State<_ExpandablePairwiseCard> {
                     padding: EdgeInsets.symmetric(vertical: 12.h),
                   ),
                   child: _isSettling 
-                    ? 16.verticalSpace
+                    ? SizedBox(
+                        width: 16.r,
+                        height: 16.r,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.r,
+                          color: AppColors.paper,
+                        ),
+                      )
                     : Text(
                         canSettleAtLeastOne 
                           ? 'SETTLE ALL DUES WITH ${entry.name.toUpperCase()}'

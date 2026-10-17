@@ -21,22 +21,22 @@ class _LedgerTabState extends State<LedgerTab> {
   Future<void> _confirmRemovePerson(
       BuildContext context, SplitProvider provider, Person person) async {
     final hasHistory = provider.expenses.any(
-            (e) => e.payerId == person.id || e.splitMap.containsKey(person.id));
+        (e) => e.payerId == person.id || e.splitMap.containsKey(person.id));
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.paper,
         shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
         title: Text('Remove ${person.name}?',
             style: const TextStyle(
                 color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Text(
           hasHistory
               ? '${person.name} has expense history in this group. They\'ll be hidden '
-              'from new expenses, but past activity and any balance '
-              'they still owe or are owed stays intact.'
+                  'from new expenses, but past activity and any balance '
+                  'they still owe or are owed stays intact.'
               : '${person.name} has no expenses yet, so they\'ll be removed completely.',
           style: const TextStyle(color: AppColors.slate),
         ),
@@ -44,7 +44,7 @@ class _LedgerTabState extends State<LedgerTab> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child:
-            const Text('Cancel', style: TextStyle(color: AppColors.slate)),
+                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -110,7 +110,7 @@ class _LedgerTabState extends State<LedgerTab> {
               _GroupRoster(
                 people: provider.people,
                 isOwner: provider.isCurrentGroupOwner,
-                onAdd: () => showAddRegisteredMemberSheet(context),
+                onAdd: () => showAddMemberSheet(context),
                 onRemove: (p) => _confirmRemovePerson(context, provider, p),
               ),
               24.verticalSpace,
@@ -204,9 +204,7 @@ class _ActivityExpenseCard extends StatelessWidget {
               // Vertical Ticket Side
               Container(
                 width: 60.w,
-                color: isFullySettled
-                    ? AppColors.sage
-                    : AppColors.brass,
+                color: isFullySettled ? AppColors.sage : AppColors.brass,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -221,7 +219,9 @@ class _ActivityExpenseCard extends StatelessWidget {
                     Text(
                       isFullySettled
                           ? 'SETTLED'
-                          : (hasProgress ? '$settledCount/$totalSplitCount' : 'TAB'),
+                          : (hasProgress
+                              ? '$settledCount/$totalSplitCount'
+                              : 'TAB'),
                       style: TextStyle(
                         fontSize: 9.sp,
                         fontWeight: FontWeight.w900,
@@ -237,7 +237,7 @@ class _ActivityExpenseCard extends StatelessWidget {
               Expanded(
                 child: Padding(
                   padding:
-                  EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
+                      EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -287,8 +287,7 @@ class _ActivityExpenseCard extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            fmtCurrency(
-                                expense.amount,
+                            fmtCurrency(expense.amount,
                                 provider.currentGroup!.currency),
                             style: TextStyle(
                               fontSize: 15.sp,
@@ -357,7 +356,7 @@ class _ParticipantCircles extends StatelessWidget {
               child: CircleAvatar(
                 radius: 9.r,
                 backgroundColor:
-                provider.personById(ids[i])?.color ?? AppColors.slate,
+                    provider.personById(ids[i])?.color ?? AppColors.slate,
                 child: Text(
                   provider.personById(ids[i])?.name[0].toUpperCase() ?? '?',
                   style: TextStyle(

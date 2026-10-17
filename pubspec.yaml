@@ -21,6 +21,8 @@ dependencies:
   firebase_storage: ^14.0.0
   http: ^1.6.0
   flutter_expandable_fab: ^3.0.0
+  flutter_contacts: ^1.1.9+2
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:

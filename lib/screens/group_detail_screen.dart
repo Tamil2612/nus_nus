@@ -13,6 +13,7 @@ import '../widgets/group_chat_tab.dart';
 import '../widgets/nus_drawer.dart';
 import '../widgets/expense_form_sheet.dart';
 import 'ai_expense_screen.dart';
+import 'group_members_screen.dart';
 
 class GroupDetailScreen extends StatefulWidget {
   const GroupDetailScreen({super.key});
@@ -285,27 +286,32 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           icon: const Icon(Icons.arrow_back, color: AppColors.paper),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              currentGroup?.name ?? 'Group',
-              style: TextStyle(
-                color: AppColors.paper,
-                fontWeight: FontWeight.bold,
-                fontSize: 18.sp,
-              ),
-            ),
-            if (currentGroup != null)
-              Text(
-                fmtCurrency(totalSpent, currentGroup.currency),
-                style: TextStyle(
-                  color: AppColors.brassSoft,
-                  fontSize: 12.sp,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-          ],
+        title: InkWell(
+          borderRadius: BorderRadius.circular(8.r),
+          onTap: currentGroup == null ? null : () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const GroupMembersScreen()),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 4.h),
+            child: Row(children: [
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(currentGroup?.name ?? 'Group',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppColors.paper,
+                      fontWeight: FontWeight.bold, fontSize: 18.sp)),
+                  if (currentGroup != null)
+                    Text(fmtCurrency(totalSpent, currentGroup.currency),
+                      style: TextStyle(color: AppColors.brassSoft,
+                        fontSize: 12.sp, fontWeight: FontWeight.w600)),
+                ],
+              )),
+              if (currentGroup != null)
+                Icon(Icons.keyboard_arrow_down, color: AppColors.brassSoft, size: 18.r),
+            ]),
+          ),
         ),
         actions: [
           if (provider.isCurrentGroupOwner)
