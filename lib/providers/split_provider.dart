@@ -997,6 +997,21 @@ class SplitProvider extends ChangeNotifier {
   /// settlement expense directly — that's what makes "settle up from here
   /// owes you, that side is enforced the same way everywhere, not just in
   /// this specific group's Balances tab.
+  /// Undoes a recorded settlement. Either person in the pair may do this,
+  /// which lets a creditor dispute a payment the debtor recorded. Returns an
+  /// error message, or null on success; expense streams refresh the balances.
+  Future<String?> revertSettlement(String groupId, String settlementId) async {
+    try {
+      await FirestoreRepository.instance.revertSettlement(groupId, settlementId);
+      return null;
+    } on FirebaseFunctionsException catch (error) {
+      return error.message ?? 'Could not undo the settlement.';
+    } catch (error) {
+      debugPrint('SplitProvider: revertSettlement failed: $error');
+      return 'Could not undo the settlement. Refresh and try again.';
+    }
+  }
+
   Future<List<String>> settlePairwise(OverallBalance entry) async {
     final errors = <String>[];
     final byCurrency = <String, List<GroupContribution>>{};
