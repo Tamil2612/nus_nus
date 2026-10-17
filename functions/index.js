@@ -2,6 +2,11 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { sendExpenseNotifications } = require('./notifications');
+const {
+  groupAllocationsByExpense,
+  subtractAllocations,
+  canRevert,
+} = require('./settlement_log');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -430,6 +435,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       // then a net settlement of 60 reconciles B's full 100 share and A's
       // 40 share, while only 60 represents the external amount paid.
       const writesByPath = new Map();
+      const allocations = [];
       const allocate = (payerId, debtorId, centsToAllocate) => {
         if (!Number.isSafeInteger(centsToAllocate) || centsToAllocate < 0) {
           throw new functions.https.HttpsError(
@@ -453,6 +459,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
           const previousCents = Math.round(Number(rawAmounts[String(debtorId)] || 0) * 100);
           nextAmounts[String(debtorId)] = (previousCents + applyCents) / 100;
           writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          allocations.push({ expenseId: doc.id, personId: debtorId, cents: applyCents });
           remaining -= applyCents;
         }
         if (remaining > 0) {
@@ -472,6 +479,23 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
       for (const write of writes) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
       }
+
+      const logRef = groupRef.collection('settlements').doc();
+      tx.set(logRef, {
+        batchId: logRef.id,
+        groupIds: [groupId],
+        groupId,
+        fromId,
+        toId,
+        amountCents: requestedCents,
+        offsetCents: reverseCents,
+        currency: String(group.currency || 'AED').toUpperCase(),
+        recordedBy: context.auth.uid,
+        participantUids: [fromPerson.linkedUserId, toPerson.linkedUserId].filter(Boolean),
+        allocations,
+        status: 'active',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
     return { success: true };
   } catch (error) {
@@ -549,7 +573,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
           const bt = b.data().createdAt && b.data().createdAt.toMillis ? b.data().createdAt.toMillis() : 0;
           return at - bt || a.id.localeCompare(b.id);
         });
-        snapshots.push({ ...item, group, docs, expenseDocs: docs.filter((doc) => doc.data().isSettlement !== true), counterpartKey, fromIsMe });
+        snapshots.push({ ...item, group, docs, expenseDocs: docs.filter((doc) => doc.data().isSettlement !== true), counterpartKey, fromIsMe, fromPerson, toPerson, allocations: [] });
       }
       const expectedCounterpart = snapshots[0].counterpartKey;
       const expectedDirection = snapshots[0].fromIsMe;
@@ -631,6 +655,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
           const previousCents = Math.round(Number(rawAmounts[String(item.toId)] || 0) * 100);
           nextAmounts[String(item.toId)] = (previousCents + applyCents) / 100;
           writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          item.allocations.push({ expenseId: doc.id, personId: item.toId, cents: applyCents });
           reverseRemaining -= applyCents;
         }
       }
@@ -657,6 +682,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
           const previousCents = Math.round(Number(rawAmounts[String(item.fromId)] || 0) * 100);
           nextAmounts[String(item.fromId)] = (previousCents + applyCents) / 100;
           writesByPath.set(doc.ref.path, { ref: doc.ref, settledAmounts: nextAmounts });
+          item.allocations.push({ expenseId: doc.id, personId: item.fromId, cents: applyCents });
           forwardRemaining -= applyCents;
         }
       }
@@ -667,11 +693,125 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
       for (const write of writesByPath.values()) {
         tx.update(write.ref, { settledAmounts: write.settledAmounts });
       }
+
+      // One audit-log entry per group, tied together by a shared batchId so
+      // the whole cross-group settlement can be undone in one step.
+      const batchId = db.collection('groups').doc().id;
+      const batchGroupIds = snapshots.map((item) => item.groupId);
+      for (const item of snapshots) {
+        const logRef = db.collection('groups').doc(item.groupId).collection('settlements').doc();
+        tx.set(logRef, {
+          batchId,
+          groupIds: batchGroupIds,
+          groupId: item.groupId,
+          fromId: item.fromId,
+          toId: item.toId,
+          amountCents: requestedCents,
+          offsetCents: reverseCents,
+          currency: [...currencySet][0],
+          recordedBy: context.auth.uid,
+          participantUids: [item.fromPerson.linkedUserId, item.toPerson.linkedUserId].filter(Boolean),
+          allocations: item.allocations,
+          status: 'active',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
     });
     return { success: true };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
     console.error('recordCrossGroupPairSettlement failed:', error);
     throw new functions.https.HttpsError('internal', 'Could not record cross-group settlement. Refresh and try again.');
+  }
+});
+
+
+// Undoes a recorded settlement (and every other group's part of the same
+// cross-group batch) by subtracting exactly what it allocated. Either person
+// in the pair may undo, which gives a creditor a way to dispute a payment the
+// debtor recorded. The log entry is kept, marked 'reverted'.
+exports.revertSettlement = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to undo a settlement.');
+  }
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  const settlementId = typeof data.settlementId === 'string' ? data.settlementId.trim() : '';
+  if (!groupId || !settlementId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid settlement reference.');
+  }
+  const uid = context.auth.uid;
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const requestedRef = db.collection('groups').doc(groupId).collection('settlements').doc(settlementId);
+      const requestedSnap = await tx.get(requestedRef);
+      if (!requestedSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Settlement not found.');
+      }
+      const requested = requestedSnap.data();
+      if (requested.status !== 'active') {
+        throw new functions.https.HttpsError('failed-precondition', 'This settlement was already undone.');
+      }
+      if (!canRevert(requested, uid)) {
+        throw new functions.https.HttpsError('permission-denied', 'Only the two people in this settlement can undo it.');
+      }
+
+      const batchGroupIds = Array.isArray(requested.groupIds) && requested.groupIds.length > 0
+        ? requested.groupIds : [groupId];
+      const logs = [];
+      for (const gid of batchGroupIds) {
+        const groupRef = db.collection('groups').doc(gid);
+        const groupSnap = await tx.get(groupRef);
+        if (!groupSnap.exists) {
+          throw new functions.https.HttpsError('failed-precondition', 'A group in this settlement no longer exists.');
+        }
+        const memberUids = groupSnap.data().memberUids || [];
+        if (!memberUids.includes(uid)) {
+          throw new functions.https.HttpsError('permission-denied', 'You are not a member of every group in this settlement.');
+        }
+        const logSnap = await tx.get(groupRef.collection('settlements').where('batchId', '==', requested.batchId));
+        for (const doc of logSnap.docs) {
+          if (doc.data().status === 'active') logs.push({ gid, ref: doc.ref, data: doc.data() });
+        }
+      }
+
+      const plans = [];
+      for (const log of logs) {
+        if (!canRevert(log.data, uid)) {
+          throw new functions.https.HttpsError('permission-denied', 'Only the two people in every settlement batch can undo it.');
+        }
+        const byExpense = groupAllocationsByExpense(log.data.allocations);
+        for (const [expenseId, centsByPerson] of Object.entries(byExpense)) {
+          const expenseRef = db.collection('groups').doc(log.gid).collection('expenses').doc(expenseId);
+          const expenseSnap = await tx.get(expenseRef);
+          if (!expenseSnap.exists) {
+            throw new functions.https.HttpsError('failed-precondition', 'An expense covered by this settlement no longer exists.');
+          }
+          const result = subtractAllocations(expenseSnap.data().settledAmounts, centsByPerson);
+          if (!result.ok) {
+            throw new functions.https.HttpsError('failed-precondition', 'This settlement can no longer be undone because the expenses changed. Contact support.');
+          }
+          plans.push({ ref: expenseRef, next: result.next });
+        }
+      }
+      if (logs.length === 0) {
+        throw new functions.https.HttpsError('failed-precondition', 'No active settlement entries remain in this batch.');
+      }
+      for (const plan of plans) {
+        tx.update(plan.ref, { settledAmounts: plan.next });
+      }
+      for (const log of logs) {
+        tx.update(log.ref, {
+          status: 'reverted',
+          revertedBy: uid,
+          revertedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('revertSettlement failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not undo the settlement. Refresh and try again.');
   }
 });
