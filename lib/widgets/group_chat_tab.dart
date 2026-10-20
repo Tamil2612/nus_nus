@@ -789,8 +789,9 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({required this.message, required this.isMine});
 
   Widget _buildImage(String url) {
-    if (url.startsWith('groups/'))
+    if (url.startsWith('groups/')) {
       return _StorageChatImage(path: url, fit: BoxFit.cover);
+    }
     if (url.startsWith('data:image')) {
       final commaIndex = url.indexOf(',');
       final base64Str = commaIndex != -1 ? url.substring(commaIndex + 1) : url;
@@ -2090,8 +2091,9 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
   }
 
   Widget _buildImage(String url) {
-    if (url.startsWith('groups/'))
+    if (url.startsWith('groups/')) {
       return _StorageChatImage(path: url, fit: BoxFit.contain);
+    }
     if (url.startsWith('data:image')) {
       final commaIndex = url.indexOf(',');
       final base64Str = commaIndex != -1 ? url.substring(commaIndex + 1) : url;

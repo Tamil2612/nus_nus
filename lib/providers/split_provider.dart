@@ -72,6 +72,7 @@ class SplitProvider extends ChangeNotifier {
   String? get uid => _uid;
 
   bool get isLoading => _isLoading;
+
   bool get isEnsuringPersonalGroup => _isEnsuringPersonalGroup;
 
   /// Called by [AuthGate] whenever the signed-in user changes. Subscribes
@@ -661,16 +662,18 @@ class SplitProvider extends ChangeNotifier {
       }
     }
     if (group == null) return 'Could not find that group.';
-    if (!group.memberUids.contains(_uid))
+    if (!group.memberUids.contains(_uid)) {
       return "You're not a member of this group.";
+    }
     Person? fromPerson;
     Person? toPerson;
     for (final p in group.members) {
       if (p.id == fromId) fromPerson = p;
       if (p.id == toId) toPerson = p;
     }
-    if (fromPerson == null || toPerson == null)
+    if (fromPerson == null || toPerson == null) {
       return 'Could not find one of the people in this settlement.';
+    }
     // Either linked account in the debtor-creditor pair may record settlement.
     if (fromPerson.linkedUserId != _uid && toPerson.linkedUserId != _uid) {
       return 'Only someone in this debtor-creditor pair can confirm settlement.';
@@ -690,8 +693,9 @@ class SplitProvider extends ChangeNotifier {
         pair.first.creditorId != toId) {
       return 'The debt direction changed. Refresh and try again.';
     }
-    if (amount - pair.first.owedAmount > 0.005)
+    if (amount - pair.first.owedAmount > 0.005) {
       return 'Settlement amount exceeds the current outstanding balance.';
+    }
     // Server recomputes the net and atomically allocates this amount to existing shares.
     try {
       await FirestoreRepository.instance.recordPairSettlement(
