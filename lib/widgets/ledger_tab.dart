@@ -5,10 +5,8 @@ import '../models/person.dart';
 import '../models/expense.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import '../screens/expense_detail_screen.dart';
-import 'add_member_sheet.dart';
 
 class LedgerTab extends StatefulWidget {
   const LedgerTab({super.key});
@@ -18,59 +16,6 @@ class LedgerTab extends StatefulWidget {
 }
 
 class _LedgerTabState extends State<LedgerTab> {
-  Future<void> _confirmRemovePerson(
-      BuildContext context, SplitProvider provider, Person person) async {
-    final hasHistory = provider.expenses.any(
-            (e) => e.payerId == person.id || e.splitMap.containsKey(person.id));
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: Text('Remove ${person.name}?',
-            style: const TextStyle(
-                color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: Text(
-          hasHistory
-              ? '${person.name} has expense history in this group. They\'ll be hidden '
-              'from new expenses, but past activity and any balance '
-              'they still owe or are owed stays intact.'
-              : '${person.name} has no expenses yet, so they\'ll be removed completely.',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child:
-            const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-
-    final archived = provider.removePerson(person.id);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(archived
-            ? '${person.name} removed from the active list — history kept.'
-            : '${person.name} removed.'),
-        backgroundColor: AppColors.inkSoft,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
@@ -105,15 +50,6 @@ class _LedgerTabState extends State<LedgerTab> {
                   ],
                 ),
               ),
-
-              // Group Roster Section
-              _GroupRoster(
-                people: provider.people,
-                isOwner: provider.isCurrentGroupOwner,
-                onAdd: () => showAddRegisteredMemberSheet(context),
-                onRemove: (p) => _confirmRemovePerson(context, provider, p),
-              ),
-              24.verticalSpace,
 
               if (expenses.isEmpty)
                 Padding(
@@ -174,164 +110,273 @@ class _ActivityExpenseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
-    final isFullySettled = expense.isFullySettled;
-    final settledCount = expense.settledCount;
-    final totalSplitCount = expense.participantCount;
-    // The payer always counts as paid, so "in progress" only starts once
-    // someone else has paid their share.
-    final hasProgress = expense.hasPaymentsFromOthers;
+    final settled = expense.isFullySettled;
+    final accent = settled ? AppColors.sage : AppColors.brass;
+    final ratio = expense.participantCount > 0
+        ? (expense.settledCount / expense.participantCount).clamp(0.0, 1.0)
+        : 0.0;
 
-    return GestureDetector(
-      onTap: onTap,
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 10.h),
       child: Container(
-        margin: EdgeInsets.only(bottom: 20.h),
-        height: 100.h,
+        width: double.infinity,
         decoration: BoxDecoration(
           color: AppColors.paper,
-          borderRadius: BorderRadius.circular(16.r),
+          borderRadius: BorderRadius.circular(20.r),
+          border: Border.all(color: accent.withValues(alpha: .7), width: 1.2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: .24),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(16.r),
-          child: Row(
-            children: [
-              // Vertical Ticket Side
-              Container(
-                width: 60.w,
-                color: isFullySettled
-                    ? AppColors.sage
-                    : AppColors.brass,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      isFullySettled
-                          ? Icons.check_circle_outline
-                          : (hasProgress ? Icons.pending : Icons.receipt_long),
-                      color: AppColors.ink,
-                      size: 24.r,
-                    ),
-                    8.verticalSpace,
-                    Text(
-                      isFullySettled
-                          ? 'SETTLED'
-                          : (hasProgress ? '$settledCount/$totalSplitCount' : 'TAB'),
-                      style: TextStyle(
-                        fontSize: 9.sp,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.ink,
-                        letterSpacing: 1.2,
+          borderRadius: BorderRadius.circular(20.r),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              child: Column(
+                children: [
+                  Container(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: .12),
+                      border: Border(
+                        bottom: BorderSide(color: accent.withValues(alpha: .2)),
                       ),
                     ),
-                  ],
-                ),
-              ),
-
-              // Main Info
-              Expanded(
-                child: Padding(
-                  padding:
-                  EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Row(
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    expense.desc.toUpperCase(),
-                                    maxLines: 1,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.all(4.r),
+                              decoration: BoxDecoration(
+                                color: accent.withValues(alpha: .2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                settled
+                                    ? Icons.check_circle_rounded
+                                    : Icons.receipt_long_rounded,
+                                color: accent,
+                                size: 14.r,
+                              ),
+                            ),
+                            8.horizontalSpace,
+                            Text(
+                              settled ? 'FULLY SETTLED' : 'EXPENSE SPLIT',
+                              style: TextStyle(
+                                color: settled ? AppColors.sage : AppColors.ink,
+                                fontSize: 10.sp,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          _formatDate(expense.createdAt),
+                          style: TextStyle(
+                            color: AppColors.slate,
+                            fontSize: 10.5.sp,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.all(16.w),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CircleAvatar(
+                              radius: 20.r,
+                              backgroundColor: payer?.color ?? AppColors.brass,
+                              child: Text(
+                                (payer?.name ?? 'S')
+                                    .characters
+                                    .first
+                                    .toUpperCase(),
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14.sp,
+                                ),
+                              ),
+                            ),
+                            12.horizontalSpace,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    expense.desc,
+                                    maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize: 13.sp,
-                                      fontWeight: FontWeight.w800,
                                       color: AppColors.ink,
-                                      letterSpacing: 0.5,
+                                      fontSize: 16.sp,
+                                      fontWeight: FontWeight.w800,
+                                      height: 1.2,
                                     ),
                                   ),
-                                ),
-                                if (isFullySettled) ...[
-                                  6.horizontalSpace,
-                                  Container(
-                                    padding: EdgeInsets.symmetric(
-                                        horizontal: 6.w, vertical: 1.5.h),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.sage
-                                          .withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(4.r),
-                                      border: Border.all(
-                                          color: AppColors.sage, width: 1.r),
-                                    ),
-                                    child: Text(
-                                      'SETTLED',
+                                  4.verticalSpace,
+                                  Text.rich(
+                                    TextSpan(
                                       style: TextStyle(
-                                        fontSize: 8.5.sp,
-                                        fontWeight: FontWeight.w900,
-                                        color: AppColors.sage,
-                                        letterSpacing: 0.5,
-                                      ),
+                                          color: AppColors.slate,
+                                          fontSize: 12.sp),
+                                      children: [
+                                        const TextSpan(text: 'Paid by '),
+                                        TextSpan(
+                                          text: payer?.name ?? 'Someone',
+                                          style: const TextStyle(
+                                            color: AppColors.ink,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
+                              ),
+                            ),
+                            8.horizontalSpace,
+                            Text(
+                              fmtCurrency(
+                                expense.amount,
+                                provider.currentGroup?.currency ?? 'AED',
+                              ),
+                              style: TextStyle(
+                                color: AppColors.ink,
+                                fontSize: 18.sp,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        14.verticalSpace,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              settled
+                                  ? 'All shares paid'
+                                  : '${expense.settledCount} of ${expense.participantCount} settled',
+                              style: TextStyle(
+                                color:
+                                    settled ? AppColors.sage : AppColors.slate,
+                                fontSize: 11.sp,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              '${(ratio * 100).round()}%',
+                              style: TextStyle(
+                                color: accent,
+                                fontSize: 11.sp,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        6.verticalSpace,
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6.r),
+                          child: LinearProgressIndicator(
+                            value: ratio,
+                            minHeight: 6.h,
+                            backgroundColor:
+                                AppColors.line.withValues(alpha: .6),
+                            valueColor: AlwaysStoppedAnimation<Color>(accent),
+                          ),
+                        ),
+                        14.verticalSpace,
+                        Divider(color: AppColors.line, height: 1),
+                        12.verticalSpace,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                _ParticipantCircles(expense: expense),
+                                8.horizontalSpace,
+                                Text(
+                                  '${expense.splitWith.length} people sharing',
+                                  style: TextStyle(
+                                    color: AppColors.slate,
+                                    fontSize: 11.sp,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                               ],
                             ),
-                          ),
-                          Text(
-                            fmtCurrency(
-                                expense.amount,
-                                provider.currentGroup!.currency),
-                            style: TextStyle(
-                              fontSize: 15.sp,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.ink,
+                            Row(
+                              children: [
+                                Text(
+                                  'VIEW SPLIT',
+                                  style: TextStyle(
+                                    color: AppColors.ink,
+                                    fontSize: 10.sp,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: .5,
+                                  ),
+                                ),
+                                5.horizontalSpace,
+                                Container(
+                                  padding: EdgeInsets.all(3.r),
+                                  decoration: const BoxDecoration(
+                                    color: AppColors.ink,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(Icons.arrow_forward_rounded,
+                                      color: AppColors.paper, size: 11.r),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
-                      4.verticalSpace,
-                      Text(
-                        'Paid by ${payer?.name ?? 'Someone'}',
-                        style: TextStyle(
-                          fontSize: 11.5.sp,
-                          color: AppColors.slate,
-                          fontWeight: FontWeight.w600,
+                          ],
                         ),
-                      ),
-                      8.verticalSpace,
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _ParticipantCircles(expense: expense),
-                          Text(
-                            'VIEW DETAILS →',
-                            style: TextStyle(
-                              fontSize: 10.sp,
-                              color: AppColors.brass,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+String _formatDate(DateTime? dateTime) {
+  if (dateTime == null) return '';
+  final local = dateTime.toLocal();
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[local.month - 1]} ${local.day}';
 }
 
 class _ParticipantCircles extends StatelessWidget {
@@ -357,7 +402,7 @@ class _ParticipantCircles extends StatelessWidget {
               child: CircleAvatar(
                 radius: 9.r,
                 backgroundColor:
-                provider.personById(ids[i])?.color ?? AppColors.slate,
+                    provider.personById(ids[i])?.color ?? AppColors.slate,
                 child: Text(
                   provider.personById(ids[i])?.name[0].toUpperCase() ?? '?',
                   style: TextStyle(
@@ -382,120 +427,6 @@ class _ParticipantCircles extends StatelessWidget {
               ),
             ),
           ),
-      ],
-    );
-  }
-}
-
-class _GroupRoster extends StatelessWidget {
-  final List<Person> people;
-  final bool isOwner;
-  final VoidCallback onAdd;
-  final Function(Person)? onRemove;
-
-  const _GroupRoster({
-    required this.people,
-    required this.isOwner,
-    required this.onAdd,
-    this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'MEMBERS',
-              style: TextStyle(
-                fontSize: 10.sp,
-                fontWeight: FontWeight.w900,
-                color: AppColors.brassSoft,
-                letterSpacing: 1.2,
-              ),
-            ),
-            if (isOwner)
-              GestureDetector(
-                onTap: onAdd,
-                child: Row(
-                  children: [
-                    Icon(Icons.add, size: 14.r, color: AppColors.brassSoft),
-                    4.horizontalSpace,
-                    Text(
-                      'ADD MEMBER',
-                      style: TextStyle(
-                        fontSize: 10.sp,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.brassSoft,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        12.verticalSpace,
-        SizedBox(
-          height: 40.h,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: people.length,
-            itemBuilder: (context, index) {
-              final p = people[index];
-              final isMe = p.linkedUserId == context.read<SplitProvider>().uid;
-
-              return Padding(
-                padding: EdgeInsets.only(right: 8.w),
-                child: Container(
-                  padding: EdgeInsets.only(
-                      left: 12.w, right: (isOwner && !isMe) ? 4.w : 12.w),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20.r),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 10.r,
-                        backgroundColor: p.color,
-                        child: Text(
-                          p.name[0].toUpperCase(),
-                          style: TextStyle(
-                              fontSize: 8.sp,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      8.horizontalSpace,
-                      Text(
-                        p.name,
-                        style: TextStyle(
-                            fontSize: 12.sp,
-                            color: AppColors.paper,
-                            fontWeight: FontWeight.w600),
-                      ),
-                      if (isOwner && !isMe) ...[
-                        4.horizontalSpace,
-                        InkWell(
-                          onTap: () => onRemove?.call(p),
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 4.w),
-                            child: Icon(Icons.close_rounded,
-                                size: 14.r, color: AppColors.slate),
-                          ),
-                        )
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
       ],
     );
   }

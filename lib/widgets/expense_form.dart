@@ -128,20 +128,20 @@ class _ExpenseFormState extends State<ExpenseForm> {
 
     final error = widget.isEditing
         ? provider.editExpense(
-      id: widget.existingExpense!.id,
-      desc: _descCtrl.text,
-      amount: totalAmount,
-      payerId: _payerId,
-      splitWith: _splitSelection,
-      customSplits: customSplits,
-    )
+            id: widget.existingExpense!.id,
+            desc: _descCtrl.text,
+            amount: totalAmount,
+            payerId: _payerId,
+            splitWith: _splitSelection,
+            customSplits: customSplits,
+          )
         : provider.addExpense(
-      desc: _descCtrl.text,
-      amount: totalAmount,
-      payerId: _payerId,
-      splitWith: _splitSelection,
-      customSplits: customSplits,
-    );
+            desc: _descCtrl.text,
+            amount: totalAmount,
+            payerId: _payerId,
+            splitWith: _splitSelection,
+            customSplits: customSplits,
+          );
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -189,6 +189,64 @@ class _ExpenseFormState extends State<ExpenseForm> {
     final allocated = _currentAllocatedSum;
     final diff = (totalAmount - allocated).abs();
     final isSettled = diff < 0.01;
+    if (provider.currentGroup?.isPersonal == true) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _descCtrl,
+            textCapitalization: TextCapitalization.sentences,
+            style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
+            decoration: AppTheme.inputDecoration('What was this expense for?'),
+          ),
+          12.verticalSpace,
+          TextField(
+            controller: _amountCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
+            decoration: AppTheme.inputDecoration(
+                'Amount (${provider.currentGroup?.currency ?? 'AED'})'),
+          ),
+          12.verticalSpace,
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(horizontal: 13.w, vertical: 12.h),
+            decoration: BoxDecoration(
+              color: AppColors.ink.withValues(alpha: .055),
+              borderRadius: BorderRadius.circular(13.r),
+              border: Border.all(color: AppColors.line),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.lock_outline_rounded,
+                    color: AppColors.slate, size: 17.r),
+                9.horizontalSpace,
+                Expanded(
+                  child: Text(
+                    'Saved to your personal ledger only',
+                    style: TextStyle(
+                        color: AppColors.slate,
+                        fontSize: 11.sp,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          18.verticalSpace,
+          SizedBox(
+            width: double.infinity,
+            height: 48.h,
+            child: ElevatedButton(
+              onPressed: () => _submit(provider),
+              style: AppTheme.solidButton,
+              child: Text(widget.isEditing ? 'Save changes' : 'Add expense',
+                  style: TextStyle(fontSize: 14.sp)),
+            ),
+          ),
+        ],
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,7 +264,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
               child: TextField(
                 controller: _amountCtrl,
                 keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
+                    const TextInputType.numberWithOptions(decimal: true),
                 style: TextStyle(color: AppColors.ink, fontSize: 14.sp),
                 decoration: AppTheme.inputDecoration(
                     'Amount (${provider.currentGroup?.currency ?? 'AED'})'),
@@ -256,8 +314,10 @@ class _ExpenseFormState extends State<ExpenseForm> {
             ),
             TextButton.icon(
               onPressed: () => setState(() => _isEqualSplit = !_isEqualSplit),
-              icon: Icon(_isEqualSplit ? Icons.call_split : Icons.equalizer_rounded,
-                  size: 16.sp, color: AppColors.brass),
+              icon: Icon(
+                  _isEqualSplit ? Icons.call_split : Icons.equalizer_rounded,
+                  size: 16.sp,
+                  color: AppColors.brass),
               label: Text(
                 _isEqualSplit ? 'Split Unequally' : 'Split Equally',
                 style: TextStyle(
@@ -284,14 +344,15 @@ class _ExpenseFormState extends State<ExpenseForm> {
                 decoration: BoxDecoration(
                   color: on ? AppColors.ink : Colors.white,
                   borderRadius: BorderRadius.circular(12.r),
-                  border: Border.all(color: on ? AppColors.ink : AppColors.line),
+                  border:
+                      Border.all(color: on ? AppColors.ink : AppColors.line),
                   boxShadow: on
                       ? [
-                    BoxShadow(
-                        color: AppColors.ink.withValues(alpha: 0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2))
-                  ]
+                          BoxShadow(
+                              color: AppColors.ink.withValues(alpha: 0.2),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2))
+                        ]
                       : null,
                 ),
                 child: Text(
@@ -329,16 +390,16 @@ class _ExpenseFormState extends State<ExpenseForm> {
                       isSettled
                           ? 'Matches total!'
                           : (allocated > totalAmount
-                          ? 'Over by ${fmtCurrency(allocated - totalAmount, provider.currentGroup?.currency ?? 'AED')}'
-                          : 'Remaining: ${fmtCurrency(totalAmount - allocated, provider.currentGroup?.currency ?? 'AED')}'),
+                              ? 'Over by ${fmtCurrency(allocated - totalAmount, provider.currentGroup?.currency ?? 'AED')}'
+                              : 'Remaining: ${fmtCurrency(totalAmount - allocated, provider.currentGroup?.currency ?? 'AED')}'),
                       style: TextStyle(
                           fontSize: 12.sp,
                           fontWeight: FontWeight.bold,
                           color: isSettled
                               ? AppColors.sage
                               : (allocated > totalAmount
-                              ? AppColors.rust
-                              : AppColors.slate)),
+                                  ? AppColors.rust
+                                  : AppColors.slate)),
                     ),
                   ],
                 ),
@@ -353,8 +414,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
                     color: isSettled
                         ? AppColors.sage
                         : (allocated > totalAmount
-                        ? AppColors.rust
-                        : AppColors.brass),
+                            ? AppColors.rust
+                            : AppColors.brass),
                     minHeight: 6.h,
                   ),
                 ),
@@ -364,8 +425,9 @@ class _ExpenseFormState extends State<ExpenseForm> {
           12.verticalSpace,
           ..._splitSelection.map((id) {
             final person = people.firstWhere(
-                  (p) => p.id == id,
-              orElse: () => provider.personById(id) ??
+              (p) => p.id == id,
+              orElse: () =>
+                  provider.personById(id) ??
                   Person(id: id, name: '?', color: AppColors.slate),
             );
             return Padding(
@@ -394,12 +456,12 @@ class _ExpenseFormState extends State<ExpenseForm> {
                     child: TextField(
                       controller: _customSplitCtrls[id],
                       keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                          const TextInputType.numberWithOptions(decimal: true),
                       style: TextStyle(fontSize: 13.sp, color: AppColors.ink),
                       textAlign: TextAlign.right,
                       decoration: AppTheme.inputDecoration('0.00').copyWith(
-                        contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
+                        contentPadding: EdgeInsets.symmetric(
+                            horizontal: 10.w, vertical: 8.h),
                       ),
                     ),
                   ),

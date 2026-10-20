@@ -23,6 +23,7 @@ class ReceiptUploadCard extends StatefulWidget {
 class _ReceiptUploadCardState extends State<ReceiptUploadCard>
     with SingleTickerProviderStateMixin {
   final ImagePicker _picker = ImagePicker();
+  bool _isPicking = false;
 
   Uint8List? get _image => widget.imageBytes;
 
@@ -45,16 +46,27 @@ class _ReceiptUploadCardState extends State<ReceiptUploadCard>
   }
 
   Future<void> _pick(ImageSource source) async {
-    final file = await _picker.pickImage(
-      source: source,
-      imageQuality: 85,
-    );
+    if (_isPicking) return;
+    setState(() => _isPicking = true);
+    try {
+      final file = await _picker.pickImage(
+        source: source,
+        imageQuality: 85,
+      );
+      if (file == null || !mounted) return;
 
-    if (file == null) return;
-
-    final bytes = await file.readAsBytes();
-
-    widget.onImageSelected(bytes);
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      widget.onImageSelected(bytes);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not load that receipt image.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPicking = false);
+    }
   }
 
   @override
@@ -95,7 +107,45 @@ class _ReceiptUploadCardState extends State<ReceiptUploadCard>
                   ),
                 ],
               ),
-              child: _image == null ? _buildPlaceholder() : _buildPreview(),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child:
+                        _image == null ? _buildPlaceholder() : _buildPreview(),
+                  ),
+                  if (_isPicking)
+                    Positioned.fill(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.ink.withValues(alpha: .72),
+                          borderRadius: BorderRadius.circular(26.r),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 28.r,
+                                height: 28.r,
+                                child: const CircularProgressIndicator(
+                                  color: AppColors.brass,
+                                  strokeWidth: 2.5,
+                                ),
+                              ),
+                              10.verticalSpace,
+                              Text('Loading receipt…',
+                                  style: TextStyle(
+                                    color: AppColors.paper,
+                                    fontSize: 12.sp,
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             );
           },
         ),
@@ -161,10 +211,13 @@ class _ReceiptUploadCardState extends State<ReceiptUploadCard>
                     foregroundColor: AppColors.ink,
                     minimumSize: Size(0, 44.h),
                     padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12.r)),
                   ),
                   icon: Icon(Icons.photo_camera, size: 16.r),
-                  label: Text("Camera", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
+                  label: Text("Camera",
+                      style: TextStyle(
+                          fontSize: 12.sp, fontWeight: FontWeight.bold)),
                 ),
               ),
               8.horizontalSpace,
@@ -178,10 +231,13 @@ class _ReceiptUploadCardState extends State<ReceiptUploadCard>
                     foregroundColor: AppColors.paper,
                     minimumSize: Size(0, 44.h),
                     padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12.r)),
                   ),
                   icon: Icon(Icons.photo_library, size: 16.r),
-                  label: Text("Gallery", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
+                  label: Text("Gallery",
+                      style: TextStyle(
+                          fontSize: 12.sp, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],

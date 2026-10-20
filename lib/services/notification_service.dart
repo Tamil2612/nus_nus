@@ -30,23 +30,26 @@ class PushEvent {
   });
 }
 
-/// Push notifications for the mobile apps (Android / iOS).
+/// Push notifications for Android, iOS and supported web PWAs.
 ///
 /// * Registers this device's FCM token under users/{uid}/private/push.
 /// * Removes this device's token on sign-out.
 /// * Keeps initialization idempotent per user.
 /// * Publishes notification events for push_navigation.dart.
-/// * Does nothing on web and desktop.
 class NotificationService {
   NotificationService._();
 
   static final NotificationService instance = NotificationService._();
 
-  /// Push is only wired up for Android and iOS.
+  /// Push is wired up for Android/iOS and web. Desktop platforms are omitted.
   static bool get isSupported =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// Set with `--dart-define=FIREBASE_VAPID_KEY=<Firebase Web Push key>`.
+  static const String webVapidKey =
+      String.fromEnvironment('FIREBASE_VAPID_KEY');
 
   /// Access messaging lazily.
   FirebaseMessaging get _messaging => FirebaseMessaging.instance;
@@ -75,7 +78,7 @@ class NotificationService {
   ///
   /// If initialization fails, the active UID is reset so a later call can
   /// retry instead of returning early.
-  Future<void> initialize(String uid) async {
+  Future<void> initialize(String uid, {bool requestPermission = true}) async {
     if (!isSupported) return;
     if (_activeUid == uid) return;
 
@@ -83,11 +86,13 @@ class NotificationService {
     _activeUid = uid;
 
     try {
-      final settings = await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
+      final settings = requestPermission
+          ? await _messaging.requestPermission(
+              alert: true,
+              badge: true,
+              sound: true,
+            )
+          : await _messaging.getNotificationSettings();
 
 // The user may have signed out or switched accounts while waiting.
       if (_activeUid != uid) return;
@@ -176,6 +181,29 @@ class NotificationService {
     }
   }
 
+  /// Call from a visible user action to enable web push. iOS requires this
+  /// permission prompt to follow a user gesture, and Home Screen installation.
+  Future<void> enableNotifications(String uid) async {
+    if (!isSupported) return;
+    if (kIsWeb && webVapidKey.isEmpty) {
+      debugPrint('Set FIREBASE_VAPID_KEY to enable web push notifications.');
+      return;
+    }
+
+    // Make the permission call before the first await so browsers retain the
+    // user activation that is required for the iPhone PWA prompt.
+    final settings = await _messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+        settings.authorizationStatus != AuthorizationStatus.provisional) {
+      return;
+    }
+    await initialize(uid, requestPermission: false);
+  }
+
   /// Call BEFORE signing out so the device stops receiving this account's
   /// pushes. Firestore rules may require the user to still be signed in.
   Future<void> clear(String uid) async {
@@ -232,6 +260,15 @@ class NotificationService {
       }
     }
 
+    if (kIsWeb) {
+      if (webVapidKey.isEmpty) return null;
+      // The app's backend currently stores legacy FCM registration tokens.
+      // ignore: deprecated_member_use
+      return _messaging.getToken(
+        vapidKey: webVapidKey,
+        serviceWorkerScriptPath: 'firebase-messaging-sw.js',
+      );
+    }
     // ignore: deprecated_member_use
     return _messaging.getToken();
   }

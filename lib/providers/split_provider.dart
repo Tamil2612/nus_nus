@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:cloud_functions/cloud_functions.dart';
 import '../data/firestore_repository.dart';
 import '../data/member_directory_repository.dart';
@@ -42,6 +43,7 @@ class SplitProvider extends ChangeNotifier {
   StreamSubscription<List<Group>>? _groupsSub;
 
   bool _personalEnsured = false;
+  bool _isEnsuringPersonalGroup = false;
   String? _writeError;
 
   /// Returns (and clears) the last failed-save message so the UI can show it.
@@ -71,6 +73,8 @@ class SplitProvider extends ChangeNotifier {
 
   bool get isLoading => _isLoading;
 
+  bool get isEnsuringPersonalGroup => _isEnsuringPersonalGroup;
+
   /// Called by [AuthGate] whenever the signed-in user changes. Subscribes
   /// to every group that user can see (owned or linked-into) in real
   /// time, or clears everything back to a blank slate when [uid] is null
@@ -87,6 +91,7 @@ class SplitProvider extends ChangeNotifier {
     _expensesByGroup.clear();
     _myDisplayName = null;
     _personalEnsured = false;
+    _isEnsuringPersonalGroup = false;
 
     if (uid == null) {
       _groupMeta = [];
@@ -101,7 +106,9 @@ class SplitProvider extends ChangeNotifier {
     notifyListeners();
 
     // Trigger push notification permission request & FCM token registration
-    NotificationService.instance.initialize(uid);
+    // On web, only register automatically if permission was already granted.
+    // The browser prompt must be initiated by an explicit user gesture.
+    NotificationService.instance.initialize(uid, requestPermission: !kIsWeb);
 
     // Resolve the signed-in user's authoritative display name in the
     // background — the member directory (`users/{uid}`) is always correct
@@ -114,7 +121,7 @@ class SplitProvider extends ChangeNotifier {
     });
 
     _groupsSub = FirestoreRepository.instance.watchGroupsForUser(uid).listen(
-          (loaded) {
+      (loaded) {
         _onGroupMetaUpdated(loaded);
         _ensurePersonalGroupExists(uid, loaded);
       },
@@ -131,8 +138,16 @@ class SplitProvider extends ChangeNotifier {
   }
 
   void _onGroupMetaUpdated(List<Group> loaded) {
-    _groupMeta = loaded;
-    _syncExpenseSubscriptions(loaded.map((g) => g.id).toSet());
+    final locallyEnsuredPersonal = _groupMeta.where(
+      (g) => g.isPersonal && g.ownerId == _uid,
+    );
+    _groupMeta = [...loaded];
+    if (_personalEnsured && !_isEnsuringPersonalGroup) {
+      for (final group in locallyEnsuredPersonal) {
+        if (!_groupMeta.any((g) => g.id == group.id)) _groupMeta.add(group);
+      }
+    }
+    _syncExpenseSubscriptions(_groupMeta.map((g) => g.id).toSet());
     _rebuildGroups();
     _isLoading = false;
     notifyListeners();
@@ -169,9 +184,8 @@ class SplitProvider extends ChangeNotifier {
       });
     }
 
-    final stale = _expenseSubs.keys
-        .where((id) => !visibleGroupIds.contains(id))
-        .toList();
+    final stale =
+        _expenseSubs.keys.where((id) => !visibleGroupIds.contains(id)).toList();
     for (final id in stale) {
       _expenseSubs.remove(id)?.cancel();
       _expensesByGroup.remove(id);
@@ -231,8 +245,7 @@ class SplitProvider extends ChangeNotifier {
     }
   }
 
-  List<Group> get sharedGroups =>
-      _groups.where((g) => !g.isPersonal).toList();
+  List<Group> get sharedGroups => _groups.where((g) => !g.isPersonal).toList();
 
   List<Group> get ownedGroups =>
       _groups.where((g) => g.ownerId == _uid && !g.isPersonal).toList();
@@ -257,6 +270,17 @@ class SplitProvider extends ChangeNotifier {
   bool get isCurrentGroupOwner =>
       currentGroup != null && currentGroup!.ownerId == _uid;
 
+  /// Owners and linked, active members can add people to the open group.
+  bool get canAddMembersToCurrentGroup {
+    final group = currentGroup;
+    final uid = _uid;
+    if (group == null || uid == null) return false;
+    return group.ownerId == uid ||
+        group.members.any(
+          (person) => person.linkedUserId == uid && !person.archived,
+        );
+  }
+
   void selectGroup(String groupId) {
     if (_groups.any((g) => g.id == groupId)) {
       _currentGroupId = groupId;
@@ -272,10 +296,10 @@ class SplitProvider extends ChangeNotifier {
     // read straight off FirebaseAuth, which can lag behind) is only used
     // as a stand-in for the rare case the directory lookup hasn't
     // resolved yet.
-    final resolvedOwnerName = (_myDisplayName != null &&
-        _myDisplayName!.isNotEmpty)
-        ? _myDisplayName!
-        : (ownerName ?? '');
+    final resolvedOwnerName =
+        (_myDisplayName != null && _myDisplayName!.isNotEmpty)
+            ? _myDisplayName!
+            : (ownerName ?? '');
 
     // Splitwise-style default: the creator is a participant in their own
     // group from the start, not just an admin looking in from outside —
@@ -290,9 +314,7 @@ class SplitProvider extends ChangeNotifier {
 
     final group = Group(
       id: FirestoreRepository.instance.newGroupId(),
-      name: name
-          .trim()
-          .isEmpty ? 'New Group' : name.trim(),
+      name: name.trim().isEmpty ? 'New Group' : name.trim(),
       currency: currency,
       ownerId: uid,
       ownerName: resolvedOwnerName,
@@ -307,14 +329,18 @@ class SplitProvider extends ChangeNotifier {
   }
 
   void _ensurePersonalGroupExists(String uid, List<Group> loaded) {
-    if (loaded.any((g) => g.isPersonal && g.ownerId == uid)) return;
+    if (loaded.any((g) => g.isPersonal && g.ownerId == uid)) {
+      _isEnsuringPersonalGroup = false;
+      return;
+    }
     if (_personalEnsured) return;
     _personalEnsured = true;
+    _isEnsuringPersonalGroup = true;
 
     final resolvedOwnerName =
-    (_myDisplayName != null && _myDisplayName!.isNotEmpty)
-        ? _myDisplayName!
-        : 'You';
+        (_myDisplayName != null && _myDisplayName!.isNotEmpty)
+            ? _myDisplayName!
+            : 'You';
 
     final me = Person(
       id: 1,
@@ -333,11 +359,33 @@ class SplitProvider extends ChangeNotifier {
       members: [me],
       expenses: const [],
     );
-    // Don't need to add to local _groupMeta yet, the stream will catch it
-    // after Firestore write. Create-only, so an existing group is never overwritten.
-    FirestoreRepository.instance.ensurePersonalGroup(group).catchError((_) {
-      _personalEnsured = false; // retry on the next stream emission
+    // The deterministic ID and create-only repository call keep an existing
+    // personal ledger intact. Add the local copy after the write succeeds so
+    // the ledger screen doesn't wait for another stream round trip.
+    FirestoreRepository.instance.ensurePersonalGroup(group).then((_) {
+      if (_uid != uid) return;
+      if (!_groupMeta.any((g) => g.id == group.id)) {
+        _groupMeta = [..._groupMeta, group];
+        _rebuildGroups();
+        _syncExpenseSubscriptions(_groupMeta.map((g) => g.id).toSet());
+      }
+      _isEnsuringPersonalGroup = false;
+      notifyListeners();
+    }).catchError((_) {
+      if (_uid != uid) return;
+      _personalEnsured = false;
+      _isEnsuringPersonalGroup = false;
+      notifyListeners();
     });
+  }
+
+  /// Retries creating the signed-in user's personal ledger after a failure.
+  void retryPersonalGroupCreation() {
+    final uid = _uid;
+    if (uid == null || _isEnsuringPersonalGroup) return;
+    _personalEnsured = false;
+    _ensurePersonalGroupExists(uid, _groupMeta);
+    notifyListeners();
   }
 
   /// Deletes a group entirely (including its people/expenses). Only the
@@ -389,14 +437,9 @@ class SplitProvider extends ChangeNotifier {
   List<Expense> get expenses => currentGroup?.expenses ?? [];
 
   double get totalSpent =>
-      expenses
-          .where((e) => !e.isSettlement)
-          .fold(0.0, (s, e) => s + e.amount);
+      expenses.where((e) => !e.isSettlement).fold(0.0, (s, e) => s + e.amount);
 
-  int get expenseCount =>
-      expenses
-          .where((e) => !e.isSettlement)
-          .length;
+  int get expenseCount => expenses.where((e) => !e.isSettlement).length;
 
   Person? personById(int id) {
     for (final p in allPeople) {
@@ -432,7 +475,7 @@ class SplitProvider extends ChangeNotifier {
 
   void addPerson(String name, {String? linkedUserId}) {
     final group = currentGroup;
-    if (group == null || group.ownerId != _uid) return;
+    if (group == null || !canAddMembersToCurrentGroup) return;
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
 
@@ -459,13 +502,16 @@ class SplitProvider extends ChangeNotifier {
     if (group == null || group.ownerId != _uid) return false;
 
     final hasHistory = expenses.any(
-          (e) => e.payerId == id || e.splitMap.containsKey(id),
+      (e) => e.payerId == id || e.splitMap.containsKey(id),
     );
 
-    final updatedMembers = allPeople.map((p) {
-      if (p.id != id) return p;
-      return hasHistory ? p.copyWith(archived: true) : p;
-    }).where((p) => hasHistory ? true : p.id != id).toList();
+    final updatedMembers = allPeople
+        .map((p) {
+          if (p.id != id) return p;
+          return hasHistory ? p.copyWith(archived: true) : p;
+        })
+        .where((p) => hasHistory ? true : p.id != id)
+        .toList();
 
     _updateGroupMeta(group.copyWith(members: updatedMembers));
     return hasHistory;
@@ -501,9 +547,7 @@ class SplitProvider extends ChangeNotifier {
       }
       double sum = customSplits.values.fold(0, (a, b) => a + b);
       if ((sum - amount).abs() > 0.01) {
-        return 'Sum of splits (${fmtCurrency(
-            sum, currency)}) must equal total (${fmtCurrency(
-            amount, currency)})';
+        return 'Sum of splits (${fmtCurrency(sum, currency)}) must equal total (${fmtCurrency(amount, currency)})';
       }
       return customSplits;
     }
@@ -572,9 +616,7 @@ class SplitProvider extends ChangeNotifier {
 
     final newExpense = Expense(
       id: FirestoreRepository.instance.newExpenseId(group.id),
-      desc: desc
-          .trim()
-          .isEmpty
+      desc: desc.trim().isEmpty
           ? (isSettlement ? 'Settlement' : 'Untitled expense')
           : desc.trim(),
       amount: amount,
@@ -605,46 +647,72 @@ class SplitProvider extends ChangeNotifier {
   /// partial settlements and keeps original expense amounts and splits intact.
   /// Either linked participant in the debtor-creditor pair may confirm; the
   /// callable revalidates the balance and atomically records the allocation.
-  Future<String?> settleUp(int fromId, int toId, double amount, {String? groupId}) async {
+  Future<String?> settleUp(int fromId, int toId, double amount,
+      {String? groupId}) async {
     final targetId = groupId ?? currentGroup?.id;
     if (targetId == null) return 'Select a group first.';
     if (!amount.isFinite || amount <= 0 || fromId == toId) {
       return 'Enter a valid settlement amount.';
     }
     Group? group;
-    for (final g in _groups) { if (g.id == targetId) { group = g; break; } }
+    for (final g in _groups) {
+      if (g.id == targetId) {
+        group = g;
+        break;
+      }
+    }
     if (group == null) return 'Could not find that group.';
-    if (!group.memberUids.contains(_uid)) return "You're not a member of this group.";
+    if (!group.memberUids.contains(_uid)) {
+      return "You're not a member of this group.";
+    }
     Person? fromPerson;
     Person? toPerson;
-    for (final p in group.members) { if (p.id == fromId) fromPerson = p; if (p.id == toId) toPerson = p; }
-    if (fromPerson == null || toPerson == null) return 'Could not find one of the people in this settlement.';
+    for (final p in group.members) {
+      if (p.id == fromId) fromPerson = p;
+      if (p.id == toId) toPerson = p;
+    }
+    if (fromPerson == null || toPerson == null) {
+      return 'Could not find one of the people in this settlement.';
+    }
     // Either linked account in the debtor-creditor pair may record settlement.
     if (fromPerson.linkedUserId != _uid && toPerson.linkedUserId != _uid) {
       return 'Only someone in this debtor-creditor pair can confirm settlement.';
     }
     final pair = SettlementCalculator.computePairBalances(
-      SettlementCalculator.deriveLedgerEntries(_expensesByGroup[group.id] ?? const <Expense>[]),
-    ).where((balance) =>
-      (balance.personAId == fromId && balance.personBId == toId) ||
-      (balance.personAId == toId && balance.personBId == fromId),
-    ).toList();
-    if (pair.isEmpty || pair.first.debtorId != fromId || pair.first.creditorId != toId) {
+      SettlementCalculator.deriveLedgerEntries(
+          _expensesByGroup[group.id] ?? const <Expense>[]),
+    )
+        .where(
+          (balance) =>
+              (balance.personAId == fromId && balance.personBId == toId) ||
+              (balance.personAId == toId && balance.personBId == fromId),
+        )
+        .toList();
+    if (pair.isEmpty ||
+        pair.first.debtorId != fromId ||
+        pair.first.creditorId != toId) {
       return 'The debt direction changed. Refresh and try again.';
     }
-    if (amount - pair.first.owedAmount > 0.005) return 'Settlement amount exceeds the current outstanding balance.';
+    if (amount - pair.first.owedAmount > 0.005) {
+      return 'Settlement amount exceeds the current outstanding balance.';
+    }
     // Server recomputes the net and atomically allocates this amount to existing shares.
     try {
       await FirestoreRepository.instance.recordPairSettlement(
-        groupId: group.id, fromId: fromId, toId: toId, amount: amount,
+        groupId: group.id,
+        fromId: fromId,
+        toId: toId,
+        amount: amount,
       );
       return null;
     } on FirebaseFunctionsException catch (error) {
-      debugPrint('SplitProvider: settlement callable failed (${error.code}): ${error.message}');
+      debugPrint(
+          'SplitProvider: settlement callable failed (${error.code}): ${error.message}');
       if (error.code == 'unauthenticated') {
         return 'Your sign-in has expired. Please sign out and sign in again.';
       }
-      if (error.code == 'permission-denied' || error.code == 'failed-precondition') {
+      if (error.code == 'permission-denied' ||
+          error.code == 'failed-precondition') {
         return error.message ?? 'The balance changed. Refresh and try again.';
       }
       return error.message ?? 'Could not record settlement. Please try again.';
@@ -751,15 +819,14 @@ class SplitProvider extends ChangeNotifier {
     for (final entry in original.settledAmounts.entries) {
       if (original.splitMap[entry.key] != null &&
           newSplitMap[entry.key] != null &&
-          (original.splitMap[entry.key]! - newSplitMap[entry.key]!).abs() < 0.005) {
+          (original.splitMap[entry.key]! - newSplitMap[entry.key]!).abs() <
+              0.005) {
         newSettledAmounts[entry.key] = entry.value;
       }
     }
 
     final updatedExpense = original.copyWith(
-      desc: desc
-          .trim()
-          .isEmpty ? original.desc : desc.trim(),
+      desc: desc.trim().isEmpty ? original.desc : desc.trim(),
       amount: amount,
       payerId: payerId,
       splitMap: newSplitMap,
@@ -933,7 +1000,7 @@ class SplitProvider extends ChangeNotifier {
       for (final pb in pairs) {
         if (pb.personAId != myId && pb.personBId != myId) continue;
         final counterpartId =
-        pb.personAId == myId ? pb.personBId : pb.personAId;
+            pb.personAId == myId ? pb.personBId : pb.personAId;
         Person? counterpart;
         for (final p in g.members) {
           if (p.id == counterpartId) {
@@ -960,30 +1027,29 @@ class SplitProvider extends ChangeNotifier {
               (currencyMaps[key]![g.currency] ?? 0) + signedFromMe;
 
           breakdowns.putIfAbsent(key, () => []).add(
-            GroupContribution(
-              groupId: g.id,
-              groupName: g.name,
-              currency: g.currency,
-              amount: signedFromMe,
-              myId: myId,
-              counterpartId: counterpartId,
-            ),
-          );
+                GroupContribution(
+                  groupId: g.id,
+                  groupName: g.name,
+                  currency: g.currency,
+                  amount: signedFromMe,
+                  myId: myId,
+                  counterpartId: counterpartId,
+                ),
+              );
         }
       }
     }
 
     final result = displayNames.keys
-        .map((key) =>
-        OverallBalance(
-          key: key,
-          name: displayNames[key]!,
-          groupCount: groupCounts[key] ?? 0,
-          currencyBalances: currencyMaps[key] ?? {},
-          breakdown: breakdowns[key] ?? [],
-        ))
+        .map((key) => OverallBalance(
+              key: key,
+              name: displayNames[key]!,
+              groupCount: groupCounts[key] ?? 0,
+              currencyBalances: currencyMaps[key] ?? {},
+              breakdown: breakdowns[key] ?? [],
+            ))
         .where((o) =>
-    o.breakdown.isNotEmpty) // Only show people with active history
+            o.breakdown.isNotEmpty) // Only show people with active history
         .toList();
 
     result.sort((a, b) => b.primarySortAmount.compareTo(a.primarySortAmount));
@@ -1002,7 +1068,8 @@ class SplitProvider extends ChangeNotifier {
   /// error message, or null on success; expense streams refresh the balances.
   Future<String?> revertSettlement(String groupId, String settlementId) async {
     try {
-      await FirestoreRepository.instance.revertSettlement(groupId, settlementId);
+      await FirestoreRepository.instance
+          .revertSettlement(groupId, settlementId);
       return null;
     } on FirebaseFunctionsException catch (error) {
       return error.message ?? 'Could not undo the settlement.';
@@ -1033,16 +1100,13 @@ class SplitProvider extends ChangeNotifier {
       // Positive from the user's perspective means the other person owes the
       // user; negative means the user owes them. At zero, either direction is
       // valid for reconciling the opposite debts without an external payment.
-      final direction = netAmount.abs() > 0.005
-          ? netAmount
-          : contributions.first.amount;
+      final direction =
+          netAmount.abs() > 0.005 ? netAmount : contributions.first.amount;
       final groups = contributions.map((contribution) {
-        final fromId = direction > 0
-            ? contribution.counterpartId
-            : contribution.myId;
-        final toId = direction > 0
-            ? contribution.myId
-            : contribution.counterpartId;
+        final fromId =
+            direction > 0 ? contribution.counterpartId : contribution.myId;
+        final toId =
+            direction > 0 ? contribution.myId : contribution.counterpartId;
         return <String, dynamic>{
           'groupId': contribution.groupId,
           'fromId': fromId,
@@ -1058,16 +1122,18 @@ class SplitProvider extends ChangeNotifier {
       } on FirebaseFunctionsException catch (error) {
         debugPrint('SplitProvider: cross-group settlement failed; '
             'code=${error.code}, message=${error.message}, details=${error.details}');
-        errors.add('$currency: ${error.message ?? 'Could not record settlement.'} '
+        errors.add(
+            '$currency: ${error.message ?? 'Could not record settlement.'} '
             '(code: ${error.code})');
       } catch (error, stackTrace) {
-        debugPrint('SplitProvider: cross-group settlement failed: $error\n$stackTrace');
-        errors.add('$currency: Could not record settlement. Refresh and try again.');
+        debugPrint(
+            'SplitProvider: cross-group settlement failed: $error\n$stackTrace');
+        errors.add(
+            '$currency: Could not record settlement. Refresh and try again.');
       }
     }
     return errors;
   }
-
 }
 
 class GroupContribution {
@@ -1136,15 +1202,15 @@ extension AiContextExtension on SplitProvider {
           'recentExpenses': g.expenses
               .where((e) => !e.isSettlement)
               .take(10)
-              .map((e) =>
-          {
-            'desc': e.desc,
-            'amount': e.amount,
-            'paidBy': g.members
-                .firstWhere((m) => m.id == e.payerId,
-                orElse: () => Person(id: 0, name: '?', color: Colors.grey))
-                .name,
-          })
+              .map((e) => {
+                    'desc': e.desc,
+                    'amount': e.amount,
+                    'paidBy': g.members
+                        .firstWhere((m) => m.id == e.payerId,
+                            orElse: () =>
+                                Person(id: 0, name: '?', color: Colors.grey))
+                        .name,
+                  })
               .toList(),
         };
       }).toList(),

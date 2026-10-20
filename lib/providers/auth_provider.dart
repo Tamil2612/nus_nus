@@ -236,7 +236,10 @@ class AuthProvider extends ChangeNotifier {
     _setBusy(true);
     try {
       final email = _user?.email;
-      if (email == null) return 'No user signed in.';
+      if (email == null) {
+        _setBusy(false);
+        return 'No user signed in.';
+      }
 
       // Re-authenticate
       AuthCredential credential = EmailAuthProvider.credential(
@@ -282,7 +285,10 @@ class AuthProvider extends ChangeNotifier {
     _setBusy(true);
     try {
       final email = _user?.email;
-      if (email == null) return 'No user signed in.';
+      if (email == null) {
+        _setBusy(false);
+        return 'No user signed in.';
+      }
 
       // Re-authenticate
       AuthCredential credential = EmailAuthProvider.credential(

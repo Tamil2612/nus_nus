@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../models/group.dart';
@@ -8,6 +9,7 @@ import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../screens/group_detail_screen.dart';
 import '../screens/edit_profile_screen.dart';
+import '../services/notification_service.dart';
 
 class NusDrawer extends StatelessWidget {
   final String? currentGroupId;
@@ -110,7 +112,7 @@ class NusDrawer extends StatelessWidget {
                   _DrawerActionTile(
                     icon: Icons.notifications_none_outlined,
                     label: 'NOTIFICATIONS',
-                    onTap: () => Navigator.pop(context),
+                    onTap: () => _showNotificationSetup(context),
                   ),
                   _DrawerActionTile(
                     icon: Icons.security_outlined,
@@ -247,7 +249,7 @@ class NusDrawer extends StatelessWidget {
                 ),
                 24.verticalSpace,
                 Text(
-                  'نص نص • NUS·NUS v1.0.0',
+                  'NUS·NUS v1.0.0',
                   style: TextStyle(
                     color: AppColors.slate.withValues(alpha: 0.6),
                     fontSize: 10.sp,
@@ -257,6 +259,66 @@ class NusDrawer extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showNotificationSetup(BuildContext context) {
+    final user = context.read<AuthProvider>().currentUser;
+    if (user == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Enable notifications'),
+        content: const Text(
+          'On iPhone, open this site in Safari and use Share → Add to Home '
+          'Screen first. Then open Nus·Nus from the Home Screen and enable '
+          'notifications here.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (kIsWeb && NotificationService.webVapidKey.isEmpty) {
+                Navigator.pop(dialogContext);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Web push needs the Firebase VAPID key in the web build.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              // Invoke the browser permission request directly from this tap.
+              final enabling =
+                  NotificationService.instance.enableNotifications(user.uid);
+              Navigator.pop(dialogContext);
+              Navigator.pop(context);
+              enabling.then((_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Notification setup finished. Check your browser permission if alerts do not appear.',
+                    ),
+                  ),
+                );
+              }).catchError((Object error) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                      content: Text('Could not enable notifications: $error')),
+                );
+              });
+            },
+            child: const Text('Enable'),
           ),
         ],
       ),

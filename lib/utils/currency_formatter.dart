@@ -10,24 +10,32 @@ String fmtCurrency(double n, String currency) {
   }
   final sign = rounded < 0 ? '-' : '';
   final symbol = _getSymbol(currency);
-  
-  // For RTL or specific formats, you can adjust here. 
-  // Sticking to "Symbol Amount" for simplicity.
   return '$symbol $sign${buf.toString()}.${parts[1]}';
 }
 
 String _getSymbol(String code) {
   switch (code.toUpperCase()) {
-    case 'AED': return 'د.إ';
-    case 'USD': return '\$';
-    case 'EUR': return '€';
-    case 'GBP': return '£';
-    case 'INR': return '₹';
-    case 'SAR': return 'ر.س';
-    case 'QAR': return 'ر.ق';
-    case 'KWD': return 'د.ك';
-    case 'BHD': return 'د.ب';
-    case 'OMR': return 'ر.ع';
-    default: return code;
+    case 'AED':
+      return 'AED';
+    case 'USD':
+      return '\$';
+    case 'EUR':
+      return '€';
+    case 'GBP':
+      return '£';
+    case 'INR':
+      return '₹';
+    case 'SAR':
+      return 'SAR';
+    case 'QAR':
+      return 'QAR';
+    case 'KWD':
+      return 'KWD';
+    case 'BHD':
+      return 'BHD';
+    case 'OMR':
+      return 'OMR';
+    default:
+      return code;
   }
 }
