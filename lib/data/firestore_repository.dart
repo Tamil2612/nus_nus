@@ -47,9 +47,8 @@ class FirestoreRepository {
   /// without re-fetching its whole member list, and vice versa.
   Stream<List<Group>> watchGroupsForUser(String uid) {
     return _groups.where('memberUids', arrayContains: uid).snapshots().map(
-            (snap) => snap.docs
-            .map((d) => Group.fromJson(d.id, d.data()))
-            .toList());
+        (snap) =>
+            snap.docs.map((d) => Group.fromJson(d.id, d.data())).toList());
   }
 
   /// Reserves a document id for a brand-new group without writing
@@ -70,11 +69,42 @@ class FirestoreRepository {
   }
 
   /// Creates the group only if it doesn't exist yet, so an existing
-  /// personal group is never overwritten.
+  /// personal group is never overwritten. Legacy personal documents are
+  /// repaired in place so the signed-in owner can discover and read them.
   Future<void> ensurePersonalGroup(Group group) async {
     final ref = _groups.doc(group.id);
     final snap = await ref.get();
-    if (!snap.exists) await ref.set(group.toJson());
+    if (!snap.exists) {
+      await ref.set(group.toJson());
+      return;
+    }
+
+    final data = snap.data() ?? <String, dynamic>{};
+    final ownerId = data['ownerId'] as String?;
+    if (ownerId != null && ownerId != group.ownerId) {
+      throw StateError('Personal group is owned by another account.');
+    }
+
+    final memberUids = (data['memberUids'] as List? ?? const [])
+        .whereType<String>()
+        .toSet()
+      ..add(group.ownerId);
+    final members = (data['members'] as List? ?? const []).toList();
+    final hasOwnerMember = members.any(
+        (member) => member is Map && member['linkedUserId'] == group.ownerId);
+    if (!hasOwnerMember && group.members.isNotEmpty) {
+      members.add(group.members.first.toJson());
+    }
+
+    final updates = <String, dynamic>{
+      if (ownerId == null) 'ownerId': group.ownerId,
+      if (data['isPersonal'] != true) 'isPersonal': true,
+      if (data['memberUids'] is! List ||
+          !(data['memberUids'] as List).contains(group.ownerId))
+        'memberUids': memberUids.toList(),
+      if (!hasOwnerMember) 'members': members,
+    };
+    if (updates.isNotEmpty) await ref.update(updates);
   }
 
   /// Deletes a group and its nested records through a trusted callable.
@@ -104,9 +134,8 @@ class FirestoreRepository {
   /// guaranteed by Firestore so callers should sort by whatever field they
   /// display by (the app sorts by insertion order client-side already).
   Stream<List<Expense>> watchExpenses(String groupId) {
-    return _expensesCol(groupId).snapshots().map((snap) => snap.docs
-        .map((d) => Expense.fromJson(d.id, d.data()))
-        .toList());
+    return _expensesCol(groupId).snapshots().map((snap) =>
+        snap.docs.map((d) => Expense.fromJson(d.id, d.data())).toList());
   }
 
   /// Adds a brand-new expense. Any member of the group may call this —
@@ -170,7 +199,8 @@ class FirestoreRepository {
     if (user == null) {
       throw FirebaseFunctionsException(
         code: 'unauthenticated',
-        message: 'Your session has expired. Sign in again to record a settlement.',
+        message:
+            'Your session has expired. Sign in again to record a settlement.',
       );
     }
     final token = await user.getIdToken(true);
@@ -201,7 +231,8 @@ class FirestoreRepository {
     if (user == null) {
       throw FirebaseFunctionsException(
         code: 'unauthenticated',
-        message: 'Your session has expired. Sign in again to record a settlement.',
+        message:
+            'Your session has expired. Sign in again to record a settlement.',
       );
     }
     final token = await user.getIdToken(true);
@@ -225,8 +256,8 @@ class FirestoreRepository {
         .limit(50)
         .snapshots()
         .map((snap) => snap.docs
-        .map((doc) => SettlementRecord.fromDoc(groupId, doc))
-        .toList());
+            .map((doc) => SettlementRecord.fromDoc(groupId, doc))
+            .toList());
   }
 
   /// Undoes a recorded settlement (and the rest of its cross-group batch)
@@ -236,7 +267,8 @@ class FirestoreRepository {
     if (user == null) {
       throw FirebaseFunctionsException(
         code: 'unauthenticated',
-        message: 'Your session has expired. Sign in again to undo a settlement.',
+        message:
+            'Your session has expired. Sign in again to undo a settlement.',
       );
     }
     final callable = FirebaseFunctions.instanceFor(region: 'us-central1')

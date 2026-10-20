@@ -58,13 +58,15 @@ class _GroupChatTabState extends State<GroupChatTab> {
       );
       if (!mounted) return;
       final byId = <String, GroupMessage>{
-        for (final message in (_olderMessagesByGroup[groupId] ?? const <GroupMessage>[]))
+        for (final message
+            in (_olderMessagesByGroup[groupId] ?? const <GroupMessage>[]))
           message.id: message,
         for (final message in page) message.id: message,
       };
       setState(() {
         _olderMessagesByGroup[groupId] = byId.values.toList();
-        _hasMoreOlderByGroup[groupId] = page.length == GroupChatRepository.pageSize;
+        _hasMoreOlderByGroup[groupId] =
+            page.length == GroupChatRepository.pageSize;
       });
     } catch (error) {
       if (mounted) {
@@ -107,7 +109,8 @@ class _GroupChatTabState extends State<GroupChatTab> {
     if (_sending || group == null || uid == null || text.isEmpty) return;
     if (text.length > GroupChatRepository.maxMessageLength) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Messages cannot exceed 1000 characters.')),
+        const SnackBar(
+            content: Text('Messages cannot exceed 1000 characters.')),
       );
       return;
     }
@@ -256,45 +259,32 @@ class _GroupChatTabState extends State<GroupChatTab> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  Icons.groups_rounded,
+                  Icons.payments_outlined,
                   color: AppColors.brassSoft,
                   size: 18.r,
                 ),
               ),
               10.horizontalSpace,
               Expanded(
-                child: Text(
-                  '${provider.people.where((p) => !p.archived).length} members in chat',
-                  style: TextStyle(
-                    color: AppColors.paper,
-                    fontSize: 12.sp,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
-                decoration: BoxDecoration(
-                  color: AppColors.brass.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12.r),
-                ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'TOTAL ',
+                      'TOTAL SPENT',
                       style: TextStyle(
-                        color: AppColors.brassSoft,
+                        color: AppColors.slate,
                         fontSize: 9.sp,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
                       ),
                     ),
+                    2.verticalSpace,
                     Text(
                       fmtCurrency(provider.totalSpent, group.currency),
                       style: TextStyle(
                         color: AppColors.brassSoft,
-                        fontSize: 12.sp,
+                        fontSize: 13.sp,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -330,14 +320,17 @@ class _GroupChatTabState extends State<GroupChatTab> {
 
               final streamedMessages = snapshot.data ?? const <GroupMessage>[];
               final messagesById = <String, GroupMessage>{
-                for (final message in (_olderMessagesByGroup[group.id] ?? const <GroupMessage>[]))
+                for (final message in (_olderMessagesByGroup[group.id] ??
+                    const <GroupMessage>[]))
                   message.id: message,
                 for (final message in streamedMessages) message.id: message,
               };
               final messages = messagesById.values.toList()
                 ..sort((a, b) {
-                  final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-                  final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                  final aTime =
+                      a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                  final bTime =
+                      b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
                   final order = bTime.compareTo(aTime);
                   return order != 0 ? order : b.id.compareTo(a.id);
                 });
@@ -420,7 +413,8 @@ class _GroupChatTabState extends State<GroupChatTab> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Text('Load older messages'),
                         ),
@@ -446,7 +440,8 @@ class _GroupChatTabState extends State<GroupChatTab> {
                       isMine: item.message!.senderUid == uid,
                     );
                   } else {
-                    contentWidget = _ExpenseTimelineCard(expense: item.expense!);
+                    contentWidget =
+                        _ExpenseTimelineCard(expense: item.expense!);
                   }
 
                   if (showDateHeader) {
@@ -479,7 +474,6 @@ class _GroupChatTabState extends State<GroupChatTab> {
     );
   }
 }
-
 
 /// Owns the text controller for the full lifetime of the edit dialog route.
 /// Disposing a controller immediately after showDialog completes can happen
@@ -705,7 +699,8 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                    onPressed:
+                        _saving ? null : () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.ink,
                       side: BorderSide(
@@ -794,7 +789,8 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({required this.message, required this.isMine});
 
   Widget _buildImage(String url) {
-    if (url.startsWith('groups/')) return _StorageChatImage(path: url, fit: BoxFit.cover);
+    if (url.startsWith('groups/'))
+      return _StorageChatImage(path: url, fit: BoxFit.cover);
     if (url.startsWith('data:image')) {
       final commaIndex = url.indexOf(',');
       final base64Str = commaIndex != -1 ? url.substring(commaIndex + 1) : url;
@@ -818,7 +814,9 @@ class _MessageBubble extends StatelessWidget {
   void _showOptionsSheet(
       BuildContext context, String? groupId, bool isGroupOwner) {
     if (groupId == null || groupId.isEmpty) return;
-    final isImage = (message.imagePath != null && message.imagePath!.isNotEmpty) || (message.imageUrl != null && message.imageUrl!.isNotEmpty);
+    final isImage =
+        (message.imagePath != null && message.imagePath!.isNotEmpty) ||
+            (message.imageUrl != null && message.imageUrl!.isNotEmpty);
     // A text message can be edited once; Firestore rules enforce this too.
     final canEdit = isMine && !isImage && !message.isEdited;
     final canDelete = isMine || isGroupOwner;
@@ -913,7 +911,6 @@ class _MessageBubble extends StatelessWidget {
     );
   }
 
-
   Future<void> _confirmDeleteMessage(
       BuildContext context, String groupId, bool isImage) async {
     final confirmed = await showDialog<bool>(
@@ -940,8 +937,8 @@ class _MessageBubble extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.slate)),
+            child:
+                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -995,7 +992,9 @@ class _MessageBubble extends StatelessWidget {
         ? message.senderName[0].toUpperCase()
         : 'M';
 
-    final hasImage = (message.imagePath != null && message.imagePath!.isNotEmpty) || (message.imageUrl != null && message.imageUrl!.isNotEmpty);
+    final hasImage =
+        (message.imagePath != null && message.imagePath!.isNotEmpty) ||
+            (message.imageUrl != null && message.imageUrl!.isNotEmpty);
     final imageSource = message.imagePath ?? message.imageUrl;
     final isMultiLine = message.text.contains('\n') || message.text.length > 32;
 
@@ -1956,8 +1955,18 @@ String _formatDateHeader(DateTime? dateTime) {
   if (date == yesterday) return 'Yesterday';
 
   final months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
   ];
 
   if (local.year == now.year) {
@@ -2032,13 +2041,16 @@ class _StorageChatImageState extends State<_StorageChatImage> {
     super.initState();
     _future = _load();
   }
+
   Future<Uint8List?> _load() => FirebaseStorage.instance
-      .ref(widget.path).getData(GroupChatRepository.maxImageBytes);
+      .ref(widget.path)
+      .getData(GroupChatRepository.maxImageBytes);
   @override
   void didUpdateWidget(covariant _StorageChatImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.path != widget.path) _future = _load();
   }
+
   @override
   Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
         future: _future,
@@ -2047,13 +2059,15 @@ class _StorageChatImageState extends State<_StorageChatImage> {
             return const Icon(Icons.broken_image, color: AppColors.slate);
           }
           if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator(
-              strokeWidth: 2, color: AppColors.brassSoft));
+            return const Center(
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.brassSoft));
           }
-          return Image.memory(snapshot.data!, fit: widget.fit,
-            filterQuality: FilterQuality.high,
-            errorBuilder: (_, __, ___) =>
-                const Icon(Icons.broken_image, color: AppColors.slate));
+          return Image.memory(snapshot.data!,
+              fit: widget.fit,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(Icons.broken_image, color: AppColors.slate));
         },
       );
 }
@@ -2076,19 +2090,23 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
   }
 
   Widget _buildImage(String url) {
-    if (url.startsWith('groups/')) return _StorageChatImage(path: url, fit: BoxFit.contain);
+    if (url.startsWith('groups/'))
+      return _StorageChatImage(path: url, fit: BoxFit.contain);
     if (url.startsWith('data:image')) {
       final commaIndex = url.indexOf(',');
       final base64Str = commaIndex != -1 ? url.substring(commaIndex + 1) : url;
-      return Image.memory(base64Decode(base64Str), fit: BoxFit.contain,
+      return Image.memory(base64Decode(base64Str),
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, __, ___) => const Center(
+              child:
+                  Icon(Icons.broken_image, color: AppColors.slate, size: 48)));
+    }
+    return Image.network(url,
+        fit: BoxFit.contain,
         filterQuality: FilterQuality.high,
         errorBuilder: (_, __, ___) => const Center(
-          child: Icon(Icons.broken_image, color: AppColors.slate, size: 48)));
-    }
-    return Image.network(url, fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
-      errorBuilder: (_, __, ___) => const Center(
-        child: Icon(Icons.broken_image, color: AppColors.slate, size: 48)));
+            child: Icon(Icons.broken_image, color: AppColors.slate, size: 48)));
   }
 
   @override

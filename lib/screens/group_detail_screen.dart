@@ -7,10 +7,8 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/balances_tab.dart';
 import '../widgets/branded_loader.dart';
-import '../utils/currency_formatter.dart';
 import '../widgets/ledger_tab.dart';
 import '../widgets/group_chat_tab.dart';
-import '../widgets/nus_drawer.dart';
 import '../widgets/expense_form_sheet.dart';
 import 'ai_expense_screen.dart';
 import 'group_members_screen.dart';
@@ -25,14 +23,18 @@ class GroupDetailScreen extends StatefulWidget {
 class _GroupDetailScreenState extends State<GroupDetailScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  late int _selectedTabIndex;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _selectedTabIndex = _tabController.index;
     _tabController.addListener(() {
-      setState(() {});
+      if (_tabController.index != _selectedTabIndex) {
+        _selectedTabIndex = _tabController.index;
+        setState(() {});
+      }
     });
   }
 
@@ -139,197 +141,97 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     );
   }
 
-  void _showRenameGroup(BuildContext context, SplitProvider provider,
-      String groupId, String currentName, String currentCurrency) {
-    final ctrl = TextEditingController(text: currentName);
-    String selectedCurrency = currentCurrency;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (context, setDialogState) {
-        return AlertDialog(
-          backgroundColor: AppColors.paper,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-          title: const Text('Rename Group',
-              style:
-                  TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ctrl,
-                autofocus: true,
-                style: TextStyle(color: AppColors.ink, fontSize: 16.sp),
-                decoration: AppTheme.inputDecoration('Group Name').copyWith(
-                  filled: false,
-                ),
-              ),
-              16.verticalSpace,
-              DropdownButtonFormField<String>(
-                initialValue: selectedCurrency,
-                dropdownColor: AppColors.paper,
-                style: TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 16.sp,
-                    fontWeight: FontWeight.bold),
-                decoration: AppTheme.inputDecoration('Currency').copyWith(
-                  prefixIcon: Icon(Icons.payments_outlined,
-                      color: AppColors.brass, size: 20.r),
-                ),
-                items: [
-                  'AED',
-                  'USD',
-                  'EUR',
-                  'GBP',
-                  'INR',
-                  'SAR',
-                  'QAR',
-                  'KWD',
-                  'BHD',
-                  'OMR'
-                ]
-                    .map((c) => DropdownMenuItem(
-                          value: c,
-                          child: Text(c,
-                              style: const TextStyle(
-                                  color: AppColors.ink,
-                                  fontWeight: FontWeight.bold)),
-                        ))
-                    .toList(),
-                onChanged: (v) => setDialogState(() => selectedCurrency = v!),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.slate)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (ctrl.text.trim().isNotEmpty) {
-                  provider.renameGroup(groupId, ctrl.text.trim(),
-                      newCurrency: selectedCurrency);
-                  Navigator.pop(ctx);
-                }
-              },
-              style: AppTheme.solidButton.copyWith(
-                padding: WidgetStateProperty.all(
-                    EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h)),
-              ),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      }),
-    );
-  }
-
-  Future<void> _confirmDeleteGroup(BuildContext context, SplitProvider provider,
-      String groupId, String name) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: Text('Delete "$name"?',
-            style: const TextStyle(
-                color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This permanently deletes the group, chat, members, '
-          'and expense history. This can\'t be undone.',
-          style: TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child:
-                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      provider.removeGroup(groupId);
-      if (context.mounted) Navigator.pop(context); // close the drawer
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
     final currentGroup = provider.currentGroup;
-    final totalSpent = provider.totalSpent;
 
     if (provider.isLoading) {
       return const BrandedLoader(message: 'Getting your groups ready…');
     }
 
     return Scaffold(
-      key: _scaffoldKey,
-      endDrawerEnableOpenDragGesture: false,
       appBar: AppBar(
+        toolbarHeight: 68.h,
+        leadingWidth: 48.w,
+        titleSpacing: 0,
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.paper),
+          tooltip: 'Back',
+          icon: Icon(Icons.arrow_back, color: AppColors.paper, size: 23.r),
           onPressed: () => Navigator.pop(context),
         ),
-        title: InkWell(
-          borderRadius: BorderRadius.circular(8.r),
-          onTap: currentGroup == null ? null : () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const GroupMembersScreen()),
-          ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 4.h),
-            child: Row(children: [
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(currentGroup?.name ?? 'Group',
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: AppColors.paper,
-                      fontWeight: FontWeight.bold, fontSize: 18.sp)),
-                  if (currentGroup != null)
-                    Text(fmtCurrency(totalSpent, currentGroup.currency),
-                      style: TextStyle(color: AppColors.brassSoft,
-                        fontSize: 12.sp, fontWeight: FontWeight.w600)),
-                ],
-              )),
-              if (currentGroup != null)
-                Icon(Icons.keyboard_arrow_down, color: AppColors.brassSoft, size: 18.r),
-            ]),
-          ),
-        ),
+        title: currentGroup == null
+            ? Text('Groups',
+                style: TextStyle(color: AppColors.paper, fontSize: 20.sp))
+            : InkWell(
+                borderRadius: BorderRadius.circular(8.r),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const GroupMembersScreen()),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 5.h),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 34.r,
+                        height: 34.r,
+                        decoration: BoxDecoration(
+                          color: AppColors.brassSoft.withValues(alpha: .14),
+                          borderRadius: BorderRadius.circular(10.r),
+                        ),
+                        child: Icon(Icons.groups_2_outlined,
+                            color: AppColors.brassSoft, size: 20.r),
+                      ),
+                      9.horizontalSpace,
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(currentGroup.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color: AppColors.paper,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 19.sp)),
+                            2.verticalSpace,
+                            Text(
+                              '${currentGroup.members.length} ${currentGroup.members.length == 1 ? 'member' : 'members'}',
+                              style: TextStyle(
+                                color: AppColors.paper.withValues(alpha: .72),
+                                fontSize: 12.sp,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
         actions: [
           if (provider.isCurrentGroupOwner)
             IconButton(
+              tooltip: 'Group members and settings',
               icon: const Icon(Icons.settings_outlined,
                   color: AppColors.brassSoft),
-              onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+              onPressed: currentGroup == null
+                  ? null
+                  : () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const GroupMembersScreen()),
+                      ),
             ),
           12.horizontalSpace,
         ],
       ),
-      endDrawer: NusDrawer(
-        currentGroupId: currentGroup?.id,
-        onRename: _showRenameGroup,
-        onDelete: _confirmDeleteGroup,
-        onAddGroup: _showAddGroup,
-      ),
-      floatingActionButton: _tabController.index == 0
+      floatingActionButton: _selectedTabIndex == 0
           ? null
           : Column(
               mainAxisSize: MainAxisSize.min,
@@ -365,8 +267,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                   icon: const Icon(Icons.add),
                   label: Text(
                     'Add Split',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 13.sp),
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp),
                   ),
                 ),
               ],
@@ -386,30 +288,36 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               : Column(
                   children: [
                     Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                      padding: EdgeInsets.fromLTRB(16.w, 8.h, 16.w, 10.h),
                       child: Container(
+                        padding: EdgeInsets.all(4.r),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(12.r),
+                          color: Colors.white.withValues(alpha: 0.045),
+                          borderRadius: BorderRadius.circular(16.r),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.09)),
                         ),
                         child: TabBar(
                           controller: _tabController,
-                          labelColor: AppColors.ink,
-                          unselectedLabelColor: AppColors.slate,
+                          dividerColor: Colors.transparent,
+                          indicatorSize: TabBarIndicatorSize.tab,
+                          indicatorPadding: EdgeInsets.all(2.r),
                           indicator: BoxDecoration(
                             color: AppColors.brassSoft,
-                            borderRadius: BorderRadius.circular(10.r),
+                            borderRadius: BorderRadius.circular(12.r),
                           ),
-                          indicatorSize: TabBarIndicatorSize.tab,
-                          indicatorPadding: EdgeInsets.all(4.r),
-                          dividerColor: Colors.transparent,
-                          labelStyle: TextStyle(
-                              fontSize: 12.5.sp, fontWeight: FontWeight.bold),
-                          tabs: const [
-                            Tab(icon: Icon(Icons.chat_bubble_outline, size: 16), text: 'Chat'),
-                            Tab(icon: Icon(Icons.receipt_long_outlined, size: 16), text: 'Expenses'),
-                            Tab(icon: Icon(Icons.account_balance_wallet_outlined, size: 16), text: 'Balances'),
+                          labelColor: AppColors.ink,
+                          unselectedLabelColor:
+                              AppColors.paper.withValues(alpha: .72),
+                          overlayColor:
+                              WidgetStateProperty.all(Colors.transparent),
+                          labelPadding: EdgeInsets.zero,
+                          tabs: [
+                            _buildGroupTab('Chat', Icons.chat_bubble_outline),
+                            _buildGroupTab(
+                                'Expenses', Icons.receipt_long_outlined),
+                            _buildGroupTab('Balances',
+                                Icons.account_balance_wallet_outlined),
                           ],
                         ),
                       ),
@@ -430,6 +338,28 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
       ),
     );
   }
+}
+
+Widget _buildGroupTab(String label, IconData icon) {
+  return Tab(
+    height: 44.h,
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 17.r),
+        5.horizontalSpace,
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10.5.sp, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Shown as the *body* of the normal Home scaffold (drawer, sign-out and
@@ -525,5 +455,3 @@ class _EmptyGroupsBody extends StatelessWidget {
     );
   }
 }
-
-

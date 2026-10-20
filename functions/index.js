@@ -895,20 +895,6 @@ exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, cont
           });
         }
       }
-      continue;
-      if (matchesByPhone.has(phone)) {
-        matchesByPhone.delete(phone);
-        ambiguous.add(phone);
-        continue;
-      }
-      if (!ambiguous.has(phone)) {
-        matchesByPhone.set(phone, {
-          uid: doc.id,
-          name: typeof doc.get('name') === 'string' && doc.get('name').trim()
-            ? doc.get('name').trim()
-            : 'Nus·Nus user',
-        });
-      }
     }
     const matches = {};
     for (const [phone, user] of matchesByPhone.entries()) {
