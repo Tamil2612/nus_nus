@@ -13,6 +13,24 @@ enum PushEventKind {
   opened,
 }
 
+enum NotificationEnableStatus {
+  enabled,
+  permissionRequired,
+  permissionDenied,
+  unsupported,
+  missingConfiguration,
+  registrationFailed,
+}
+
+class NotificationEnableResult {
+  final NotificationEnableStatus status;
+  final String? message;
+
+  const NotificationEnableResult(this.status, {this.message});
+
+  bool get succeeded => status == NotificationEnableStatus.enabled;
+}
+
 class PushEvent {
   final PushEventKind kind;
   final String? title;
@@ -61,7 +79,13 @@ class NotificationService {
   Stream<PushEvent> get events => _events.stream;
 
   String? _activeUid;
+  String? _requestedUid;
   String? _token;
+  String? _registeredUid;
+  String? _registrationUid;
+  int _sessionGeneration = 0;
+  int? _registrationGeneration;
+  Future<NotificationEnableResult>? _registrationFuture;
 
   StreamSubscription<String>? _refreshSub;
   StreamSubscription<RemoteMessage>? _foregroundSub;
@@ -74,17 +98,80 @@ class NotificationService {
           .collection('private')
           .doc('push');
 
-  /// Requests permission, registers this device and starts listening.
-  ///
-  /// If initialization fails, the active UID is reset so a later call can
-  /// retry instead of returning early.
-  Future<void> initialize(String uid, {bool requestPermission = true}) async {
-    if (!isSupported) return;
-    if (_activeUid == uid) return;
+  /// Current capability and registration state for the signed-in user.
+  Future<NotificationEnableResult> statusFor(String uid) async {
+    if (uid.trim().isEmpty || !isSupported) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.unsupported,
+      );
+    }
+    if (kIsWeb && webVapidKey.isEmpty) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.missingConfiguration,
+      );
+    }
+    try {
+      if (!await _messaging.isSupported()) {
+        return const NotificationEnableResult(
+          NotificationEnableStatus.unsupported,
+        );
+      }
+      final settings = await _messaging.getNotificationSettings();
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        return const NotificationEnableResult(
+          NotificationEnableStatus.permissionDenied,
+        );
+      }
+      if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+          settings.authorizationStatus != AuthorizationStatus.provisional) {
+        return const NotificationEnableResult(
+          NotificationEnableStatus.permissionRequired,
+        );
+      }
+      if (_registeredUid == uid) {
+        return const NotificationEnableResult(
+          NotificationEnableStatus.enabled,
+        );
+      }
+      final pending = _registrationFuture;
+      if (_registrationUid == uid &&
+          _registrationGeneration == _sessionGeneration &&
+          _requestedUid == uid &&
+          pending != null) {
+        return await pending;
+      }
+      // Permission exists, but this app instance has not finished registering
+      // its token yet. Keep the opt-in action available as a retry.
+      return const NotificationEnableResult(
+        NotificationEnableStatus.permissionRequired,
+        message: 'Permission is allowed; finish registering this device.',
+      );
+    } catch (_) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.registrationFailed,
+        message: 'Could not check notification settings. Please try again.',
+      );
+    }
+  }
 
-    await _detach();
-    _activeUid = uid;
-
+  /// Initializes notifications. Web startup only checks existing permission;
+  /// the explicit opt-in method below is the only web permission prompt.
+  Future<NotificationEnableResult> initialize(
+    String uid, {
+    bool requestPermission = true,
+  }) async {
+    if (uid.trim().isEmpty || !isSupported) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.unsupported,
+      );
+    }
+    if (kIsWeb && webVapidKey.isEmpty) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.missingConfiguration,
+      );
+    }
+    _claimSession(uid);
+    final generation = _sessionGeneration;
     try {
       final settings = requestPermission
           ? await _messaging.requestPermission(
@@ -93,125 +180,221 @@ class NotificationService {
               sound: true,
             )
           : await _messaging.getNotificationSettings();
-
-// The user may have signed out or switched accounts while waiting.
-      if (_activeUid != uid) return;
-
+      if (generation != _sessionGeneration || _requestedUid != uid) {
+        return _sessionChangedResult;
+      }
       if (settings.authorizationStatus != AuthorizationStatus.authorized &&
           settings.authorizationStatus != AuthorizationStatus.provisional) {
-        debugPrint('Push notifications not allowed by the user.');
-
-// Allow initialize() to retry if permission is granted later.
-        _activeUid = null;
-        await _detach();
-        return;
+        return NotificationEnableResult(
+          settings.authorizationStatus == AuthorizationStatus.denied
+              ? NotificationEnableStatus.permissionDenied
+              : NotificationEnableStatus.permissionRequired,
+        );
       }
+      return await _registerAuthorizedUser(uid, generation);
+    } catch (_) {
+      debugPrint('NotificationService initialization failed.');
+      return const NotificationEnableResult(
+        NotificationEnableStatus.registrationFailed,
+        message: 'Could not initialize notifications. Please try again.',
+      );
+    }
+  }
 
-// iOS: allow system banners while the app is in the foreground.
-// Android foreground presentation can be handled through [events].
-      if (defaultTargetPlatform == TargetPlatform.iOS) {
+  /// Must be called directly from a user action. On iPhone/iPad, Web Push is
+  /// available only in an installed Home Screen web app on OS 16.4 or later.
+  Future<NotificationEnableResult> enableNotifications(String uid) async {
+    if (uid.trim().isEmpty || !isSupported) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.unsupported,
+      );
+    }
+    if (kIsWeb && webVapidKey.isEmpty) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.missingConfiguration,
+      );
+    }
+    _claimSession(uid);
+    final generation = _sessionGeneration;
+    if (_registeredUid == uid) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.enabled,
+      );
+    }
+
+    try {
+      // Keep this as the first asynchronous operation so the browser preserves
+      // the user activation from the opt-in tap.
+      final settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      if (generation != _sessionGeneration || _requestedUid != uid) {
+        return _sessionChangedResult;
+      }
+      if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+          settings.authorizationStatus != AuthorizationStatus.provisional) {
+        return NotificationEnableResult(
+          settings.authorizationStatus == AuthorizationStatus.denied
+              ? NotificationEnableStatus.permissionDenied
+              : NotificationEnableStatus.permissionRequired,
+        );
+      }
+      return await _registerAuthorizedUser(uid, generation);
+    } catch (_) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.registrationFailed,
+        message:
+            'Could not enable notifications. Check your connection and try again.',
+      );
+    }
+  }
+
+  void _claimSession(String uid) {
+    if (_requestedUid == uid) return;
+    _requestedUid = uid;
+    _sessionGeneration++;
+    _activeUid = null;
+    _registeredUid = null;
+  }
+
+  static const _sessionChangedResult = NotificationEnableResult(
+    NotificationEnableStatus.registrationFailed,
+    message: 'The signed-in account changed. Please try again.',
+  );
+
+  Future<NotificationEnableResult> _registerAuthorizedUser(
+    String uid,
+    int generation,
+  ) {
+    if (generation != _sessionGeneration || _requestedUid != uid) {
+      return Future.value(_sessionChangedResult);
+    }
+    if (_registeredUid == uid) {
+      return Future.value(const NotificationEnableResult(
+        NotificationEnableStatus.enabled,
+      ));
+    }
+    final pending = _registrationFuture;
+    if (_registrationUid == uid &&
+        _registrationGeneration == generation &&
+        pending != null) {
+      return pending;
+    }
+
+    final registration = _performRegistration(uid, generation);
+    _registrationUid = uid;
+    _registrationGeneration = generation;
+    _registrationFuture = registration;
+    return registration.whenComplete(() {
+      if (identical(_registrationFuture, registration)) {
+        _registrationFuture = null;
+        _registrationUid = null;
+        _registrationGeneration = null;
+      }
+    });
+  }
+
+  Future<NotificationEnableResult> _performRegistration(
+    String uid,
+    int generation,
+  ) async {
+    try {
+      await _detach();
+      if (generation != _sessionGeneration || _requestedUid != uid) {
+        return _sessionChangedResult;
+      }
+      _activeUid = uid;
+
+      // iOS: allow system banners while the app is in the foreground.
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
         await _messaging.setForegroundNotificationPresentationOptions(
           alert: true,
           badge: true,
           sound: true,
         );
       }
+      if (_activeUid != uid || generation != _sessionGeneration) {
+        return _sessionChangedResult;
+      }
 
-      if (_activeUid != uid) return;
-
-// Install listeners before fetching the token so refreshes and
-// incoming notifications are not missed.
       _foregroundSub = FirebaseMessaging.onMessage.listen((message) {
-        if (_activeUid != uid) return;
-        _publish(PushEventKind.foreground, message);
+        if (_activeUid == uid && generation == _sessionGeneration) {
+          _publish(PushEventKind.foreground, message);
+        }
       });
-
       _openedSub = FirebaseMessaging.onMessageOpenedApp.listen((message) {
-        if (_activeUid != uid) return;
-        _publish(PushEventKind.opened, message);
+        if (_activeUid == uid && generation == _sessionGeneration) {
+          _publish(PushEventKind.opened, message);
+        }
       });
 
-      // Keep legacy FCM registration tokens until the server sender is migrated
-      // to Firebase Installation IDs; changing only the client breaks delivery.
+      // Retain FCM registration tokens until the notification backend migrates.
       // ignore: deprecated_member_use
       _refreshSub = _messaging.onTokenRefresh.listen(
         (newToken) {
-          if (_activeUid != uid) return;
-
+          if (_activeUid != uid || generation != _sessionGeneration) return;
           _token = newToken;
-
-// Do not allow an asynchronous Firestore failure to go unnoticed.
-          _saveToken(uid, newToken).catchError((Object error) {
-            debugPrint('Failed to save refreshed FCM token: $error');
+          _saveToken(uid, newToken).then((_) {
+            _registeredUid = uid;
+          }).catchError((Object _) {
+            debugPrint('Failed to save refreshed notification token.');
           });
         },
-        onError: (Object error) {
-          debugPrint('FCM token refresh stream error: $error');
-        },
+        onError: (Object _) => debugPrint('Notification token refresh failed.'),
       );
 
       final token = await _fetchToken();
-
-      if (_activeUid != uid) return;
-
-      if (token == null || token.isEmpty) {
-        debugPrint('FCM token is not available yet.');
-      } else {
-        _token = token;
-        await _saveToken(uid, token);
+      if (_activeUid != uid || generation != _sessionGeneration) {
+        return _sessionChangedResult;
       }
-
-      if (_activeUid != uid) return;
-
-// Handle a notification that launched the app from a terminated state.
+      if (token == null || token.isEmpty) {
+        throw StateError('Notification token was not returned.');
+      }
+      _token = token;
+      await _saveToken(uid, token);
+      if (_activeUid != uid || generation != _sessionGeneration) {
+        return _sessionChangedResult;
+      }
+      _registeredUid = uid;
       final initial = await _messaging.getInitialMessage();
-
-      if (initial != null && _activeUid == uid) {
+      if (initial != null &&
+          _activeUid == uid &&
+          generation == _sessionGeneration) {
         _publish(PushEventKind.opened, initial);
       }
-    } catch (error, stackTrace) {
-      debugPrint('NotificationService initialization error: $error');
-      debugPrintStack(stackTrace: stackTrace);
-
-// Reset only if this initialization still belongs to the active user.
-      if (_activeUid == uid) {
+      return const NotificationEnableResult(NotificationEnableStatus.enabled);
+    } catch (_) {
+      debugPrint('NotificationService token registration failed.');
+      if (_activeUid == uid && generation == _sessionGeneration) {
         _activeUid = null;
+        _registeredUid = null;
         await _detach();
       }
+      return const NotificationEnableResult(
+        NotificationEnableStatus.registrationFailed,
+        message:
+            'Could not register this device. Check your connection and try again.',
+      );
     }
-  }
-
-  /// Call from a visible user action to enable web push. iOS requires this
-  /// permission prompt to follow a user gesture, and Home Screen installation.
-  Future<void> enableNotifications(String uid) async {
-    if (!isSupported) return;
-    if (kIsWeb && webVapidKey.isEmpty) {
-      debugPrint('Set FIREBASE_VAPID_KEY to enable web push notifications.');
-      return;
-    }
-
-    // Make the permission call before the first await so browsers retain the
-    // user activation that is required for the iPhone PWA prompt.
-    final settings = await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-    if (settings.authorizationStatus != AuthorizationStatus.authorized &&
-        settings.authorizationStatus != AuthorizationStatus.provisional) {
-      return;
-    }
-    await initialize(uid, requestPermission: false);
   }
 
   /// Call BEFORE signing out so the device stops receiving this account's
   /// pushes. Firestore rules may require the user to still be signed in.
   Future<void> clear(String uid) async {
-    final token = _token;
-
-// Stop listeners and invalidate the active account before async work.
+    final pending = _registrationUid == uid ? _registrationFuture : null;
+    final registeredToken = _token;
+    _sessionGeneration++;
+    _requestedUid = null;
     _activeUid = null;
+    _registeredUid = null;
+    // Let an in-flight Firestore token write finish before removing the token,
+    // so sign-out cannot leave a newly written token behind.
+    if (pending != null) await pending;
+    final token = _token ?? registeredToken;
     await _detach();
+    _registeredUid = null;
 
     if (!isSupported) return;
 

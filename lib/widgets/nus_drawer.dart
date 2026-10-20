@@ -30,6 +30,7 @@ class NusDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
+    final notificationUid = context.watch<AuthProvider>().currentUser?.uid;
 
     return Drawer(
       backgroundColor: AppColors.paper,
@@ -109,11 +110,8 @@ class NusDrawer extends StatelessWidget {
                       );
                     },
                   ),
-                  _DrawerActionTile(
-                    icon: Icons.notifications_none_outlined,
-                    label: 'NOTIFICATIONS',
-                    onTap: () => _showNotificationSetup(context),
-                  ),
+                  if (notificationUid != null)
+                    _NotificationOptInTile(uid: notificationUid),
                   _DrawerActionTile(
                     icon: Icons.security_outlined,
                     label: 'SECURITY',
@@ -264,64 +262,203 @@ class NusDrawer extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _showNotificationSetup(BuildContext context) {
-    final user = context.read<AuthProvider>().currentUser;
-    if (user == null) return;
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Enable notifications'),
-        content: const Text(
-          'On iPhone, open this site in Safari and use Share → Add to Home '
-          'Screen first. Then open Nus·Nus from the Home Screen and enable '
-          'notifications here.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Not now'),
+class _NotificationOptInTile extends StatefulWidget {
+  final String uid;
+
+  const _NotificationOptInTile({required this.uid});
+
+  @override
+  State<_NotificationOptInTile> createState() => _NotificationOptInTileState();
+}
+
+class _NotificationOptInTileState extends State<_NotificationOptInTile> {
+  late Future<NotificationEnableResult> _statusFuture;
+  bool _isEnabling = false;
+  NotificationEnableResult? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshStatus();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NotificationOptInTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uid != widget.uid) _refreshStatus();
+  }
+
+  void _refreshStatus() {
+    _result = null;
+    _statusFuture = NotificationService.instance.statusFor(widget.uid);
+  }
+
+  Future<void> _enable() async {
+    if (_isEnabling) return;
+    setState(() => _isEnabling = true);
+    // The service requests permission before awaiting anything else, preserving
+    // Safari's user activation from this tap.
+    final result =
+        await NotificationService.instance.enableNotifications(widget.uid);
+    if (!mounted) return;
+    setState(() {
+      _isEnabling = false;
+      _result = result;
+      _statusFuture = Future.value(result);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<NotificationEnableResult>(
+      future: _statusFuture,
+      builder: (context, snapshot) {
+        final result = _result ?? snapshot.data;
+        final status = result?.status;
+        final loadingStatus = !snapshot.hasData && _result == null;
+        final enabled = status == NotificationEnableStatus.enabled;
+        final denied = status == NotificationEnableStatus.permissionDenied;
+        final unsupported = status == NotificationEnableStatus.unsupported;
+        final missingConfig =
+            status == NotificationEnableStatus.missingConfiguration;
+
+        String description;
+        if (loadingStatus) {
+          description = 'Checking notification availability…';
+        } else if (enabled) {
+          description = 'Notifications are enabled on this device.';
+        } else if (denied) {
+          description = kIsWeb
+              ? 'Permission was denied. On iPhone, allow it in Settings → Notifications → Nus·Nus or Safari website settings, then check again.'
+              : 'Permission was denied. Allow notifications in your device settings, then check again.';
+        } else if (unsupported) {
+          description = kIsWeb
+              ? 'This browser does not support Web Push. On iPhone, use an installed Home Screen web app with iOS 16.4 or later.'
+              : 'Notifications are not supported on this device.';
+        } else if (missingConfig) {
+          description =
+              'Web Push is not configured for this build. Set FIREBASE_VAPID_KEY and rebuild.';
+        } else if (result?.status ==
+            NotificationEnableStatus.registrationFailed) {
+          description = kIsWeb
+              ? '${result?.message ?? 'Registration failed.'} On iPhone, launch the installed Home Screen app on iOS/iPadOS 16.4 or later.'
+              : result?.message ??
+                  'Registration failed. Check your connection and try again.';
+        } else {
+          description = 'Get updates about new group activity.';
+        }
+
+        final canEnable = !loadingStatus &&
+            !enabled &&
+            !unsupported &&
+            !missingConfig &&
+            !denied;
+
+        return Container(
+          margin: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
+          padding: EdgeInsets.all(14.w),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: .58),
+            borderRadius: BorderRadius.circular(16.r),
+            border: Border.all(color: AppColors.line),
           ),
-          FilledButton(
-            onPressed: () {
-              if (kIsWeb && NotificationService.webVapidKey.isEmpty) {
-                Navigator.pop(dialogContext);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Web push needs the Firebase VAPID key in the web build.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    enabled
+                        ? Icons.notifications_active_outlined
+                        : Icons.notifications_none_outlined,
+                    color: enabled ? AppColors.sage : AppColors.inkSoft,
+                    size: 21.r,
+                  ),
+                  10.horizontalSpace,
+                  Expanded(
+                    child: Text(
+                      'Notifications',
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 14.sp,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                );
-                return;
-              }
-              // Invoke the browser permission request directly from this tap.
-              final enabling =
-                  NotificationService.instance.enableNotifications(user.uid);
-              Navigator.pop(dialogContext);
-              Navigator.pop(context);
-              enabling.then((_) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Notification setup finished. Check your browser permission if alerts do not appear.',
+                  if (enabled)
+                    Icon(Icons.check_circle, color: AppColors.sage, size: 19.r),
+                ],
+              ),
+              7.verticalSpace,
+              Text(
+                description,
+                style: TextStyle(
+                  color: AppColors.slate,
+                  fontSize: 11.sp,
+                  height: 1.35,
+                ),
+              ),
+              if (_isEnabling) ...[
+                12.verticalSpace,
+                const LinearProgressIndicator(color: AppColors.brass),
+              ] else if (canEnable) ...[
+                10.verticalSpace,
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _enable,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Enable notifications'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.ink,
+                      foregroundColor: AppColors.paper,
+                      padding: EdgeInsets.symmetric(vertical: 11.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12.r),
+                      ),
                     ),
                   ),
-                );
-              }).catchError((Object error) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text('Could not enable notifications: $error')),
-                );
-              });
-            },
-            child: const Text('Enable'),
+                ),
+              ] else if (denied) ...[
+                TextButton.icon(
+                  onPressed: () => setState(_refreshStatus),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Check permission again'),
+                ),
+              ],
+              if (kIsWeb)
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.only(bottom: 4.h),
+                  title: Text(
+                    'iPhone setup',
+                    style: TextStyle(
+                      color: AppColors.inkSoft,
+                      fontSize: 11.sp,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  children: [
+                    Text(
+                      'On iOS/iPadOS 16.4 or later: open Nus·Nus in Safari, '
+                      'tap Share → Add to Home Screen, enable “Open as Web App” '
+                      'if shown, then launch the Home Screen app, sign in, and '
+                      'tap Enable notifications. Installing it does not open '
+                      'the permission prompt by itself.',
+                      style: TextStyle(
+                        color: AppColors.slate,
+                        fontSize: 10.5.sp,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
