@@ -210,9 +210,22 @@ firebase deploy --only functions
 Build and deploy Flutter web hosting:
 
 ```bash
-flutter build web
+flutter build web --dart-define=FIREBASE_VAPID_KEY="$FIREBASE_VAPID_KEY"
 firebase deploy --only hosting
 ```
+
+Before building, set `FIREBASE_VAPID_KEY` to the Firebase project's **Web Push
+public key** from Firebase Console → Project settings → Cloud Messaging → Web
+Push certificates. Do not use a private key or the Firebase API key. The key is
+public and must be supplied to every web build; the Hosting deployment
+workflow reads it from the GitHub Actions repository secret with the same name.
+Firebase Hosting serves the PWA over HTTPS, which Web Push requires.
+
+On iPhone/iPad, Web Push requires iOS/iPadOS 16.4 or later and an installed
+Home Screen web app. Open Nus·Nus in Safari, choose Share → Add to Home Screen,
+enable “Open as Web App” if offered, then launch that icon, sign in, and tap
+Enable notifications in the drawer. Installing the PWA does not itself request
+notification permission.
 
 Deploying rules is required for the latest chat access and one-time edit restrictions to apply in production. Deploying functions is required for backend functionality such as message notifications and group deletion cleanup. Do not run deployment commands until you have verified the active Firebase project and reviewed the changes.
 
