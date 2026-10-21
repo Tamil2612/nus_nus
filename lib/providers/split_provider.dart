@@ -32,6 +32,7 @@ class SplitProvider extends ChangeNotifier {
   String? _currentGroupId;
   bool _isLoading = true;
   String? _uid;
+  int? _requestedLandingTabIndex;
 
   /// The signed-in user's own registered display name, resolved from the
   /// member directory (the authoritative source — see [setUserId]) rather
@@ -51,6 +52,20 @@ class SplitProvider extends ChangeNotifier {
     final e = _writeError;
     _writeError = null;
     return e;
+  }
+
+  /// Requests a landing tab change after a flow returns from a pushed route.
+  void requestLandingTab(int index) {
+    if (index < 0 || index > 1) return;
+    _requestedLandingTabIndex = index;
+    notifyListeners();
+  }
+
+  /// Consumes the pending landing tab request, if one was queued.
+  int? takeLandingTabRequest() {
+    final index = _requestedLandingTabIndex;
+    _requestedLandingTabIndex = null;
+    return index;
   }
 
   /// Runs a Firestore write whose result the UI doesn't wait for. A failure
@@ -404,6 +419,24 @@ class SplitProvider extends ChangeNotifier {
     _rebuildGroups();
     notifyListeners();
     _persist(FirestoreRepository.instance.deleteGroup(groupId));
+  }
+
+  /// Leaves the selected shared group. Owners must transfer ownership first.
+  Future<void> leaveCurrentGroup({String? transferToUid}) async {
+    final group = currentGroup;
+    if (group == null || group.isPersonal) {
+      throw StateError('There is no shared group to leave.');
+    }
+    await FirestoreRepository.instance.leaveGroup(
+      group.id,
+      transferToUid: transferToUid,
+    );
+
+    _groupMeta = _groupMeta.where((item) => item.id != group.id).toList();
+    _expensesByGroup.remove(group.id);
+    _rebuildGroups();
+    _syncExpenseSubscriptions(_groupMeta.map((item) => item.id).toSet());
+    notifyListeners();
   }
 
   void renameGroup(String groupId, String newName, {String? newCurrency}) {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// What happened to a push notification, as far as the UI cares.
 enum PushEventKind {
@@ -98,6 +99,14 @@ class NotificationService {
           .collection('private')
           .doc('push');
 
+  String _notificationsEnabledKey(String uid) =>
+      'nus_nus_notifications_enabled_$uid';
+
+  Future<bool> _isOptedOut(String uid) async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_notificationsEnabledKey(uid)) == false;
+  }
+
   /// Current capability and registration state for the signed-in user.
   Future<NotificationEnableResult> statusFor(String uid) async {
     if (uid.trim().isEmpty || !isSupported) {
@@ -111,6 +120,12 @@ class NotificationService {
       );
     }
     try {
+      if (await _isOptedOut(uid)) {
+        return const NotificationEnableResult(
+          NotificationEnableStatus.permissionRequired,
+          message: 'Notifications are off on this device.',
+        );
+      }
       if (!await _messaging.isSupported()) {
         return const NotificationEnableResult(
           NotificationEnableStatus.unsupported,
@@ -173,6 +188,12 @@ class NotificationService {
     _claimSession(uid);
     final generation = _sessionGeneration;
     try {
+      if (await _isOptedOut(uid)) {
+        return const NotificationEnableResult(
+          NotificationEnableStatus.permissionRequired,
+          message: 'Notifications are off on this device.',
+        );
+      }
       final settings = requestPermission
           ? await _messaging.requestPermission(
               alert: true,
@@ -357,6 +378,8 @@ class NotificationService {
       if (_activeUid != uid || generation != _sessionGeneration) {
         return _sessionChangedResult;
       }
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool(_notificationsEnabledKey(uid), true);
       _registeredUid = uid;
       final initial = await _messaging.getInitialMessage();
       if (initial != null &&
@@ -383,6 +406,44 @@ class NotificationService {
   /// Call BEFORE signing out so the device stops receiving this account's
   /// pushes. Firestore rules may require the user to still be signed in.
   Future<void> clear(String uid) async {
+    await _clearDeviceToken(uid);
+  }
+
+  /// Stops push delivery on this device without signing the user out.
+  Future<NotificationEnableResult> disableNotifications(String uid) async {
+    if (uid.trim().isEmpty || !isSupported) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.unsupported,
+      );
+    }
+    final removed = await _clearDeviceToken(uid);
+    if (!removed) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.registrationFailed,
+        message: 'Could not turn off notifications. Please try again.',
+      );
+    }
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool(_notificationsEnabledKey(uid), false);
+    } catch (_) {
+      return const NotificationEnableResult(
+        NotificationEnableStatus.registrationFailed,
+        message: 'Could not save this notification setting. Please try again.',
+      );
+    }
+    return const NotificationEnableResult(
+      NotificationEnableStatus.permissionRequired,
+      message: 'Notifications are off on this device.',
+    );
+  }
+
+  Future<void> forgetAccount(String uid) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_notificationsEnabledKey(uid));
+  }
+
+  Future<bool> _clearDeviceToken(String uid) async {
     final pending = _registrationUid == uid ? _registrationFuture : null;
     final registeredToken = _token;
     _sessionGeneration++;
@@ -396,7 +457,7 @@ class NotificationService {
     await _detach();
     _registeredUid = null;
 
-    if (!isSupported) return;
+    if (!isSupported) return true;
 
     try {
       if (token != null && token.isNotEmpty) {
@@ -411,9 +472,11 @@ class NotificationService {
 // Invalidate this device's current FCM token.
       // ignore: deprecated_member_use
       await _messaging.deleteToken();
+      return true;
     } catch (error, stackTrace) {
       debugPrint('NotificationService.clear error: $error');
       debugPrintStack(stackTrace: stackTrace);
+      return false;
     }
   }
 

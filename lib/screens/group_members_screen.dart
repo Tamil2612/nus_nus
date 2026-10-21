@@ -83,6 +83,197 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     );
   }
 
+  Future<void> _leaveGroup(SplitProvider provider, Group group) async {
+    final isOwner = group.ownerId == provider.uid;
+    String? transferToUid;
+    var shouldDeleteGroup = false;
+
+    if (isOwner) {
+      final candidates = group.members
+          .where((member) =>
+              !member.archived &&
+              member.linkedUserId != null &&
+              member.linkedUserId != provider.uid &&
+              group.memberUids.contains(member.linkedUserId))
+          .toList();
+      final decision = await _ownerLeaveDialog(group, candidates);
+      if (decision == null || !mounted) return;
+      transferToUid = decision.transferToUid;
+      shouldDeleteGroup = decision.deleteGroup;
+
+      if (shouldDeleteGroup) {
+        await _deleteGroup(group);
+        return;
+      }
+    } else {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: AppColors.paper,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
+          title: Text(
+            'Leave “${group.name}”?',
+            style: const TextStyle(
+                color: AppColors.ink, fontWeight: FontWeight.w800),
+          ),
+          content: const Text(
+            'You will lose access to this group. Shared expenses and balances will remain, and your old member and chat names will show as “Former member”.',
+            style: TextStyle(color: AppColors.slate, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.rust,
+                foregroundColor: AppColors.paper,
+              ),
+              child: const Text('Leave group'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    try {
+      await provider.leaveCurrentGroup(transferToUid: transferToUid);
+      if (mounted) {
+        // Leaving a shared group should return to the shared-groups view,
+        // rather than dropping the user into their personal spend tab.
+        provider.requestLandingTab(1);
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Could not leave the group. Please try again.'),
+          backgroundColor: AppColors.rust,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<_OwnerLeaveDecision?> _ownerLeaveDialog(
+    Group group,
+    List<Person> candidates,
+  ) async {
+    String? selectedUid;
+    var deleteGroup = false;
+    return showDialog<_OwnerLeaveDecision>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.paper,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
+          title: Text(
+            'Leave “${group.name}”?',
+            style: const TextStyle(
+                color: AppColors.ink, fontWeight: FontWeight.w800),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  candidates.isEmpty
+                      ? 'As the owner, you cannot leave an ownerless group. No active registered member can take ownership.'
+                      : 'Transfer ownership to an active member before leaving. Your access will be removed, while shared expenses and balances stay with the group.',
+                  style: const TextStyle(color: AppColors.slate, height: 1.4),
+                ),
+                if (candidates.isNotEmpty) ...[
+                  16.verticalSpace,
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedUid,
+                    isExpanded: true,
+                    dropdownColor: AppColors.paper,
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 13.sp,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: AppTheme.inputDecoration('New group owner'),
+                    items: candidates
+                        .map((person) => DropdownMenuItem<String>(
+                              value: person.linkedUserId,
+                              child: Text(person.name,
+                                  overflow: TextOverflow.ellipsis),
+                            ))
+                        .toList(),
+                    onChanged: (uid) => setDialogState(() => selectedUid = uid),
+                  ),
+                ],
+                12.verticalSpace,
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.rust.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12.r),
+                    border: Border.all(
+                        color: AppColors.rust.withValues(alpha: 0.22)),
+                  ),
+                  child: CheckboxListTile(
+                    value: deleteGroup,
+                    activeColor: AppColors.rust,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(
+                      'Delete group instead',
+                      style: TextStyle(
+                        color: AppColors.rust,
+                        fontSize: 12.sp,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Permanently remove its expenses, chat, and history.',
+                      style: TextStyle(color: AppColors.slate, fontSize: 10.sp),
+                    ),
+                    onChanged: (value) => setDialogState(() {
+                      deleteGroup = value ?? false;
+                      if (deleteGroup) selectedUid = null;
+                    }),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: deleteGroup || selectedUid != null
+                  ? () => Navigator.pop(
+                        dialogContext,
+                        _OwnerLeaveDecision(
+                          transferToUid: selectedUid,
+                          deleteGroup: deleteGroup,
+                        ),
+                      )
+                  : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: deleteGroup ? AppColors.rust : AppColors.ink,
+                foregroundColor: AppColors.paper,
+                disabledBackgroundColor: AppColors.paperDim,
+                disabledForegroundColor: AppColors.slate,
+              ),
+              child:
+                  Text(deleteGroup ? 'Continue to delete' : 'Transfer & leave'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _editGroup(Group group) async {
     const supportedCurrencies = [
       'AED',
@@ -643,9 +834,45 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                             },
                           ),
                   ),
+                  if (!group.isPersonal)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(18.w, 12.h, 18.w, 18.h),
+                      child: OutlinedButton.icon(
+                        onPressed: () => _leaveGroup(provider, group),
+                        icon: Icon(Icons.exit_to_app_rounded, size: 20.r),
+                        label: Text(
+                          'Leave group',
+                          style: TextStyle(
+                            fontSize: 14.sp,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.rust,
+                          side: BorderSide(
+                              color: AppColors.rust.withValues(alpha: .55)),
+                          minimumSize: Size(double.infinity, 54.h),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 20.w, vertical: 15.h),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16.r),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
       ),
     );
   }
+}
+
+class _OwnerLeaveDecision {
+  final String? transferToUid;
+  final bool deleteGroup;
+
+  const _OwnerLeaveDecision({
+    required this.transferToUid,
+    required this.deleteGroup,
+  });
 }

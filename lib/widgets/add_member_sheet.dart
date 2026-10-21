@@ -519,8 +519,11 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     final provider = context.watch<SplitProvider>();
     final media = MediaQuery.of(context);
     final bottomInset = media.viewInsets.bottom;
+    final screenSpace = media.size.height - media.padding.top - 8.h;
+    // Keep the sheet comfortably below full-screen at rest, then reclaim the
+    // available space above the keyboard so search results remain visible.
     final availableHeight =
-        (media.size.height - bottomInset - media.padding.top - 8.h)
+        (bottomInset > 0 ? screenSpace - bottomInset : screenSpace * 0.86)
             .clamp(240.h, media.size.height);
     final registeredContacts = _contacts
         .where((contact) => _registeredContactFor(contact) != null)

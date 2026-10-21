@@ -22,6 +22,19 @@ StreamSubscription<PushEvent>? _pushSub;
 /// Call once at startup (before runApp).
 void registerPushNavigation() {
   _pushSub ??= NotificationService.instance.events.listen(_onPushEvent);
+  if (kIsWeb) {
+    // The service worker puts notification data in the launch URL so taps
+    // can be handled even when the PWA was closed or had to be navigated.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final query = Uri.base.queryParameters;
+      final data = <String, String>{
+        for (final key in const ['type', 'groupId', 'expenseId', 'messageId'])
+          if (query['push_$key'] case final value? when value.isNotEmpty)
+            key: value,
+      };
+      if (data.isNotEmpty) _openFromPush(data);
+    });
+  }
 }
 
 void _onPushEvent(PushEvent event) {
@@ -90,18 +103,27 @@ int _openGeneration = 0;
 /// up instead of giving up immediately.
 Future<void> _openFromPush(Map<String, String> data) async {
   final notificationType = data['type'];
-  if (notificationType != 'expense_created' && notificationType != 'group_message') return;
+  if (notificationType != 'expense_created' &&
+      notificationType != 'group_message') {
+    return;
+  }
   final groupId = data['groupId'];
   final expenseId = data['expenseId'];
   if (groupId == null || groupId.isEmpty) return;
-  if (notificationType == 'expense_created' && (expenseId == null || expenseId.isEmpty)) return;
+  if (notificationType == 'expense_created' &&
+      (expenseId == null || expenseId.isEmpty)) {
+    return;
+  }
 
   final generation = ++_openGeneration;
   for (var attempt = 0; attempt < 50; attempt++) {
     if (generation != _openGeneration) return; // a newer tap took over
     final navigator = appNavigatorKey.currentState;
     final context = navigator?.context;
-    if (navigator != null && context != null && navigator.mounted && context.mounted) {
+    if (navigator != null &&
+        context != null &&
+        navigator.mounted &&
+        context.mounted) {
       final provider = Provider.of<SplitProvider>(context, listen: false);
       final groupExists = provider.groups.any((group) => group.id == groupId);
       if (groupExists) {
@@ -115,7 +137,8 @@ Future<void> _openFromPush(Map<String, String> data) async {
         final expense = _findExpense(provider, groupId, expenseId ?? '');
         if (expense != null) {
           navigator.push(
-            MaterialPageRoute<void>(builder: (_) => ExpenseDetailScreen(expense: expense)),
+            MaterialPageRoute<void>(
+                builder: (_) => ExpenseDetailScreen(expense: expense)),
           );
           return;
         }
@@ -127,7 +150,8 @@ Future<void> _openFromPush(Map<String, String> data) async {
       '(signed out, or no longer a member?).');
 }
 
-Expense? _findExpense(SplitProvider provider, String groupId, String expenseId) {
+Expense? _findExpense(
+    SplitProvider provider, String groupId, String expenseId) {
   for (final group in provider.groups) {
     if (group.id != groupId) continue;
     for (final expense in group.expenses) {

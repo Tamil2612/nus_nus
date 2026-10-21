@@ -125,6 +125,26 @@ class FirestoreRepository {
     }
   }
 
+  /// Leaves a shared group through a trusted callable. Group owners must
+  /// supply the registered member who will inherit ownership.
+  Future<void> leaveGroup(
+    String groupId, {
+    String? transferToUid,
+  }) async {
+    if (FirebaseAuth.instance.currentUser == null) {
+      throw FirebaseFunctionsException(
+        code: 'unauthenticated',
+        message: 'Sign in again before leaving this group.',
+      );
+    }
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('leaveGroup');
+    await callable.call({
+      'groupId': groupId,
+      if (transferToUid != null) 'transferToUid': transferToUid,
+    });
+  }
+
   // -- Expenses --------------------------------------------------------------
 
   /// Reserves a document id for a brand-new expense in [groupId].

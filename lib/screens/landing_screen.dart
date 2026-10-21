@@ -222,6 +222,12 @@ class _LandingScreenState extends State<LandingScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
+    final requestedTab = provider.takeLandingTabRequest();
+    if (requestedTab != null && requestedTab != _tabController.index) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _tabController.animateTo(requestedTab);
+      });
+    }
 
     return Scaffold(
       key: _scaffoldKey,

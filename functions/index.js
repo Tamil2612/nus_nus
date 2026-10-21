@@ -20,6 +20,16 @@ const genAI = new GoogleGenerativeAI(apiKey);
 const db = admin.firestore();
 const { normalizeLookupPhone } = require('./phone_lookup');
 
+async function assertAccountActive(uid) {
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (userSnap.exists && userSnap.data().accountDeletionInProgress === true) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'This account is being deleted and can no longer make changes.',
+    );
+  }
+}
+
 // Gemini AI Service Function
 exports.parseBillWithAI = functions.https.onCall(async (data, context) => {
   // Check authentication
@@ -29,6 +39,7 @@ exports.parseBillWithAI = functions.https.onCall(async (data, context) => {
       'The function must be called while authenticated.'
     );
   }
+  await assertAccountActive(context.auth.uid);
 
   const { imageBase64, instructions, memberNames } = data;
 
@@ -161,6 +172,7 @@ exports.queryAppState = functions.https.onCall(async (data, context) => {
       'The function must be called while authenticated.'
     );
   }
+  await assertAccountActive(context.auth.uid);
 
   const { userQuery, appContext } = data;
 
@@ -292,6 +304,7 @@ exports.deleteGroup = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to delete this group.');
   }
+  await assertAccountActive(context.auth.uid);
   const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
   if (!groupId || groupId.length > 200 || groupId.includes('/')) {
     throw new functions.https.HttpsError('invalid-argument', 'Invalid group ID.');
@@ -305,17 +318,370 @@ exports.deleteGroup = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('permission-denied', 'Only the group owner can delete this group.');
   }
   try {
-    const [objects] = await admin.storage().bucket().getFiles({
-      prefix: `groups/${groupId}/chat/`
-    });
-    await Promise.all(objects.map((object) => object.delete()));
-    await db.recursiveDelete(groupRef);
+    await deleteGroupData(groupId);
     return { deleted: true };
   } catch (error) {
     console.error('deleteGroup failed:', error);
     throw new functions.https.HttpsError('internal', 'Could not completely delete the group. Please try again.');
   }
 });
+
+// Allows a group member to leave while preserving ledger history. Owners must
+// atomically transfer ownership to an active registered member before leaving.
+exports.leaveGroup = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to leave this group.');
+  }
+  const uid = context.auth.uid;
+  await assertAccountActive(uid);
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  const transferToUid = typeof data.transferToUid === 'string'
+    ? data.transferToUid.trim() : '';
+  if (!groupId || groupId.length > 200 || groupId.includes('/') ||
+      (transferToUid && (transferToUid === uid || transferToUid.length > 128))) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid group leave request.');
+  }
+
+  const groupRef = db.collection('groups').doc(groupId);
+  let ownerName = '';
+  try {
+    await db.runTransaction(async (tx) => {
+      const snapshot = await tx.get(groupRef);
+      if (!snapshot.exists) {
+        throw new functions.https.HttpsError('not-found', 'Group not found.');
+      }
+      const group = snapshot.data();
+      if (group.isPersonal === true) {
+        throw new functions.https.HttpsError('failed-precondition', 'Your personal ledger cannot be left.');
+      }
+      const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
+      const members = Array.isArray(group.members) ? group.members : [];
+      const isOwner = group.ownerId === uid;
+
+      if (!isOwner && !memberUids.includes(uid)) {
+        throw new functions.https.HttpsError('permission-denied', 'You are not an active member of this group.');
+      }
+      if (isOwner && !transferToUid) {
+        throw new functions.https.HttpsError('failed-precondition', 'Transfer ownership before leaving the group.');
+      }
+      if (!isOwner && transferToUid) {
+        throw new functions.https.HttpsError('invalid-argument', 'Only the owner can transfer ownership.');
+      }
+
+      let nextOwner = null;
+      if (isOwner) {
+        nextOwner = members.find((member) => member &&
+          member.linkedUserId === transferToUid && member.archived !== true &&
+          memberUids.includes(transferToUid));
+        if (!nextOwner) {
+          throw new functions.https.HttpsError('failed-precondition', 'Choose an active registered member of this group.');
+        }
+        ownerName = String(nextOwner.name || 'Member').slice(0, 80);
+      }
+
+      const updatedMembers = members.map((member) =>
+        member && member.linkedUserId === uid
+          ? { ...member, name: 'Former member', linkedUserId: null, archived: true }
+          : member);
+      tx.update(groupRef, {
+        ...(isOwner ? { ownerId: transferToUid, ownerName } : {}),
+        memberUids: memberUids.filter((memberUid) => memberUid !== uid),
+        members: updatedMembers,
+      });
+    });
+
+    // Keep chat content while removing the departed account's display name.
+    // Membership has already been safely changed, so message cleanup is best
+    // effort and cannot turn a completed leave into a misleading failure.
+    try {
+      const messages = await groupRef.collection('messages')
+        .where('senderUid', '==', uid).get();
+      for (let start = 0; start < messages.docs.length; start += 400) {
+        const batch = db.batch();
+        for (const message of messages.docs.slice(start, start + 400)) {
+          batch.update(message.ref, { senderName: 'Former member' });
+        }
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error('leaveGroup chat anonymization failed:', error);
+    }
+    return { left: true, ownershipTransferred: Boolean(transferToUid) };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('leaveGroup failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not leave the group. Please try again.');
+  }
+});
+
+async function getGroupsForAccount(uid) {
+  const [memberGroups, ownedGroups, personalGroup] = await Promise.all([
+    db.collection('groups').where('memberUids', 'array-contains', uid).get(),
+    db.collection('groups').where('ownerId', '==', uid).get(),
+    db.collection('groups').doc(`personal_${uid}`).get(),
+  ]);
+  const byId = new Map();
+  for (const snapshot of [memberGroups, ownedGroups]) {
+    for (const doc of snapshot.docs) byId.set(doc.id, doc);
+  }
+  if (personalGroup.exists) byId.set(personalGroup.id, personalGroup);
+  return [...byId.values()];
+}
+
+// Returns the owner handoff choices before the UI asks the user to confirm
+// account deletion. Only active, registered group members are valid owners.
+exports.getAccountDeletionPlan = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to review account deletion.');
+  }
+  try {
+    const uid = context.auth.uid;
+    const groups = await getGroupsForAccount(uid);
+    const ownedGroups = groups
+      .filter((doc) => doc.data().ownerId === uid && doc.data().isPersonal !== true)
+      .map((doc) => {
+        const group = doc.data();
+        const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
+        const candidates = (Array.isArray(group.members) ? group.members : [])
+          .filter((member) => member && member.archived !== true &&
+            typeof member.linkedUserId === 'string' &&
+            member.linkedUserId !== uid && memberUids.includes(member.linkedUserId))
+          .map((member) => ({
+            uid: member.linkedUserId,
+            name: String(member.name || 'Member').slice(0, 80),
+          }))
+          .filter((candidate, index, all) =>
+            all.findIndex((item) => item.uid === candidate.uid) === index);
+        return {
+          groupId: doc.id,
+          name: String(group.name || 'Untitled group').slice(0, 100),
+          candidates,
+        };
+      });
+    return { ownedGroups };
+  } catch (error) {
+    console.error('getAccountDeletionPlan failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not load the account deletion plan. Please try again.');
+  }
+});
+
+async function deleteGroupData(groupId) {
+  const groupRef = db.collection('groups').doc(groupId);
+  const groupSnap = await groupRef.get();
+  if (!groupSnap.exists) return;
+  const [objects] = await admin.storage().bucket().getFiles({
+    prefix: `groups/${groupId}/chat/`,
+  });
+  for (let i = 0; i < objects.length; i += 100) {
+    await Promise.all(objects.slice(i, i + 100).map((object) => object.delete()));
+  }
+  await db.recursiveDelete(groupRef);
+}
+
+// Account deletion is deliberately server-owned: the client cannot transfer
+// group ownership, unlink members, or recursively remove another user's data.
+exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1GB' })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Sign in again before deleting your account.');
+    }
+    const uid = context.auth.uid;
+    const authTime = Number(context.auth.token && context.auth.token.auth_time);
+    if (!Number.isFinite(authTime) || Date.now() / 1000 - authTime > 5 * 60) {
+      throw new functions.https.HttpsError('failed-precondition', 'Please confirm your password again and retry.');
+    }
+
+    const transfers = data && data.transfers && typeof data.transfers === 'object' &&
+      !Array.isArray(data.transfers) ? data.transfers : {};
+    const deleteGroupIds = Array.isArray(data && data.deleteGroupIds)
+      ? data.deleteGroupIds : [];
+    if (deleteGroupIds.length > 100 ||
+        deleteGroupIds.some((id) => typeof id !== 'string' || !id || id.length > 200 || id.includes('/')) ||
+        Object.keys(transfers).length > 100 ||
+        Object.entries(transfers).some(([groupId, targetUid]) =>
+          !groupId || groupId.length > 200 || groupId.includes('/') ||
+          typeof targetUid !== 'string' || !targetUid || targetUid === uid)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid group ownership choices.');
+    }
+    const deleteIds = new Set(deleteGroupIds);
+    const transferEntries = Object.entries(transfers);
+    if (deleteIds.size !== deleteGroupIds.length ||
+        transferEntries.some(([groupId]) => deleteIds.has(groupId))) {
+      throw new functions.https.HttpsError('invalid-argument', 'Choose one action for each group.');
+    }
+
+    try {
+      // Re-read all owned groups before changing anything. Newly created or
+      // newly acquired groups must also receive an explicit user decision.
+      const ownedSnapshot = await db.collection('groups').where('ownerId', '==', uid).get();
+      const ownedShared = ownedSnapshot.docs.filter((doc) => doc.data().isPersonal !== true);
+      for (const doc of ownedShared) {
+        if (!deleteIds.has(doc.id) && !Object.prototype.hasOwnProperty.call(transfers, doc.id)) {
+          throw new functions.https.HttpsError('failed-precondition', 'Review every shared group you own before deleting your account.');
+        }
+      }
+
+      // Validate every transfer before performing any deletion or transfer.
+      for (const [groupId, targetUid] of transferEntries) {
+        const groupRef = db.collection('groups').doc(groupId);
+        const groupSnap = await groupRef.get();
+        if (!groupSnap.exists) {
+          throw new functions.https.HttpsError('failed-precondition', 'A group selected for transfer no longer exists. Refresh the plan and try again.');
+        }
+        const group = groupSnap.data();
+        if (group.isPersonal === true) {
+          throw new functions.https.HttpsError('invalid-argument', 'Personal ledgers cannot be transferred.');
+        }
+        if (group.ownerId === targetUid) continue; // completed during a retry
+        if (group.ownerId !== uid) {
+          throw new functions.https.HttpsError('failed-precondition', 'A group owner changed. Refresh the plan and try again.');
+        }
+        const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
+        const recipient = (Array.isArray(group.members) ? group.members : []).find((member) =>
+          member && member.linkedUserId === targetUid && member.archived !== true &&
+          memberUids.includes(targetUid));
+        if (!recipient) {
+          throw new functions.https.HttpsError('failed-precondition', 'Every new owner must be an active, registered member of that group.');
+        }
+      }
+
+      for (const groupId of deleteIds) {
+        const groupSnap = await db.collection('groups').doc(groupId).get();
+        if (!groupSnap.exists) continue; // completed during a retry
+        const group = groupSnap.data();
+        if (group.ownerId !== uid || group.isPersonal === true) {
+          throw new functions.https.HttpsError('permission-denied', 'Only a shared group you own can be deleted here.');
+        }
+      }
+
+      // Block writes from other signed-in devices before starting cleanup.
+      // This callable remains allowed so a failed cleanup can be retried.
+      await db.collection('users').doc(uid).set({
+        accountDeletionInProgress: true,
+        accountDeletionStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      for (const groupId of deleteIds) await deleteGroupData(groupId);
+
+      const transferredGroupIds = [];
+      for (const [groupId, targetUid] of transferEntries) {
+        const groupRef = db.collection('groups').doc(groupId);
+        await db.runTransaction(async (tx) => {
+          const groupSnap = await tx.get(groupRef);
+          if (!groupSnap.exists) {
+            throw new functions.https.HttpsError('failed-precondition', 'A group selected for transfer no longer exists.');
+          }
+          const group = groupSnap.data();
+          if (group.ownerId === targetUid) return; // completed during a retry
+          if (group.ownerId !== uid) {
+            throw new functions.https.HttpsError('failed-precondition', 'A group owner changed. Refresh the plan and try again.');
+          }
+          const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
+          const recipient = (Array.isArray(group.members) ? group.members : []).find((member) =>
+            member && member.linkedUserId === targetUid && member.archived !== true &&
+            memberUids.includes(targetUid));
+          if (!recipient) {
+            throw new functions.https.HttpsError('failed-precondition', 'The selected new owner is no longer an active group member.');
+          }
+          tx.update(groupRef, {
+            ownerId: targetUid,
+            ownerName: String(recipient.name || 'Member').slice(0, 80),
+            memberUids: [...new Set([...memberUids, targetUid])],
+          });
+        });
+        transferredGroupIds.push(groupId);
+      }
+
+      // Delete all personal ledgers. The deterministic path also catches
+      // legacy personal documents that are missing ownerId/memberUids.
+      const personalIds = new Set([`personal_${uid}`]);
+      const currentOwned = await db.collection('groups').where('ownerId', '==', uid).get();
+      for (const doc of currentOwned.docs) {
+        if (doc.data().isPersonal === true) personalIds.add(doc.id);
+      }
+      for (const groupId of personalIds) await deleteGroupData(groupId);
+
+      // Remove account access while retaining shared ledger rows. Historical
+      // participant IDs and amounts remain stable; identifying labels become
+      // “Former member” so the remaining group history stays understandable.
+      const memberGroupSnapshot = await db.collection('groups')
+        .where('memberUids', 'array-contains', uid).get();
+      const groupsToUpdate = new Map(memberGroupSnapshot.docs.map((doc) => [doc.id, doc]));
+      for (const groupId of transferredGroupIds) {
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+        if (groupDoc.exists) groupsToUpdate.set(groupId, groupDoc);
+      }
+      let groupBatch = db.batch();
+      let groupWrites = 0;
+      for (const doc of groupsToUpdate.values()) {
+        const group = doc.data();
+        if (group.ownerId === uid) {
+          throw new functions.https.HttpsError('failed-precondition', 'A shared group still belongs to this account. No account data was removed.');
+        }
+        const members = (Array.isArray(group.members) ? group.members : []).map((member) =>
+          member && member.linkedUserId === uid
+            ? { ...member, name: 'Former member', linkedUserId: null, archived: true }
+            : member);
+        groupBatch.update(doc.ref, {
+          memberUids: (Array.isArray(group.memberUids) ? group.memberUids : []).filter((id) => id !== uid),
+          members,
+        });
+        groupWrites++;
+        if (groupWrites === 400) {
+          await groupBatch.commit();
+          groupBatch = db.batch();
+          groupWrites = 0;
+        }
+      }
+      if (groupWrites > 0) await groupBatch.commit();
+
+      let messageBatch = db.batch();
+      let messageWrites = 0;
+      // Query each retained group's messages separately. A collection-group
+      // query requires a manually-created index in this project, and would
+      // otherwise fail after destructive cleanup had already started.
+      for (const groupDoc of groupsToUpdate.values()) {
+        const messageSnapshot = await groupDoc.ref.collection('messages')
+          .where('senderUid', '==', uid).get();
+        for (const messageDoc of messageSnapshot.docs) {
+          messageBatch.update(messageDoc.ref, { senderName: 'Former member' });
+          messageWrites++;
+          if (messageWrites === 400) {
+            await messageBatch.commit();
+            messageBatch = db.batch();
+            messageWrites = 0;
+          }
+        }
+      }
+      if (messageWrites > 0) await messageBatch.commit();
+
+      // Replace the profile with a non-PII tombstone and remove private push
+      // tokens. The marker blocks writes if Auth deletion needs to be retried.
+      const userRef = db.collection('users').doc(uid);
+      await userRef.set({
+        accountDeletionInProgress: true,
+        accountDeletionStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await db.recursiveDelete(userRef.collection('private'));
+      try {
+        await admin.auth().deleteUser(uid);
+      } catch (error) {
+        if (error.code !== 'auth/user-not-found') throw error;
+      }
+      try {
+        await userRef.delete();
+      } catch (error) {
+        // Account and private profile data are already gone. This leaves only
+        // a non-PII tombstone, which is safe to remove operationally later.
+        console.error('Could not remove account-deletion tombstone:', error);
+      }
+      return { deleted: true };
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError) throw error;
+      console.error('deleteAccountData failed:', error);
+      throw new functions.https.HttpsError('internal', 'Account cleanup did not finish. Sign in and retry; completed steps are safe to repeat.');
+    }
+  });
 
 // Health check function
 exports.healthCheck = functions.https.onRequest((req, res) => {
@@ -328,6 +694,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to record a settlement.');
   }
+  await assertAccountActive(context.auth.uid);
 
   const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
   const fromId = Number(data.fromId);
@@ -519,6 +886,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to record a settlement.');
   }
+  await assertAccountActive(context.auth.uid);
 
   const amount = Number(data.amount);
   const groupsInput = data.groups;
@@ -744,6 +1112,7 @@ exports.revertSettlement = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to undo a settlement.');
   }
+  await assertAccountActive(context.auth.uid);
   const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
   const settlementId = typeof data.settlementId === 'string' ? data.settlementId.trim() : '';
   if (!groupId || !settlementId) {
@@ -834,6 +1203,7 @@ exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, cont
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to match your contacts.');
   }
+  await assertAccountActive(context.auth.uid);
   const rawPhones = data && data.phoneNumbers;
   if (!Array.isArray(rawPhones) || rawPhones.length < 1 || rawPhones.length > 500 ||
       rawPhones.some((phone) => typeof phone !== 'string' || phone.length > 40)) {
@@ -915,6 +1285,7 @@ exports.lookupRegisteredUserByPhone = functions.https.onCall(async (data, contex
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to search registered users.');
   }
+  await assertAccountActive(context.auth.uid);
   const rawPhone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
   const queryDigits = normalizeLookupPhone(rawPhone);
   if (queryDigits.length < 7 || queryDigits.length > 15) {

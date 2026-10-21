@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import '../data/account_deletion_repository.dart';
 import '../data/member_directory_repository.dart';
 import '../models/app_user.dart';
 import '../services/notification_service.dart';
@@ -166,10 +168,12 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Deletes the signed-in account (requires the current password).
-  /// NOTE: groups this user owns are not touched — decide whether to delete
-  /// them or transfer ownership before exposing this in the UI.
-  Future<String?> deleteAccount(String currentPassword) async {
+  /// Deletes the account after the user has chosen how to handle owned groups.
+  Future<String?> deleteAccount({
+    required String currentPassword,
+    required Map<String, String> transfers,
+    required List<String> deleteGroupIds,
+  }) async {
     final user = _user;
     final email = user?.email;
     if (user == null || email == null) return 'No user signed in.';
@@ -178,14 +182,36 @@ class AuthProvider extends ChangeNotifier {
       await user.reauthenticateWithCredential(
         EmailAuthProvider.credential(email: email, password: currentPassword),
       );
-      await NotificationService.instance.clear(user.uid);
-      await MemberDirectoryRepository.instance.deleteProfile(user.uid);
-      await user.delete();
+      await user.getIdToken(true);
+      // A previous interrupted deletion may already have set the server-side
+      // deletion marker, which blocks client writes. Token cleanup is best
+      // effort; the callable removes the server token records as part of the
+      // deletion and must still be allowed to retry.
+      try {
+        await NotificationService.instance.clear(user.uid);
+      } catch (error) {
+        debugPrint(
+            'Could not clear notification token before account deletion: $error');
+      }
+      await AccountDeletionRepository.instance.deleteAccount(
+        transfers: transfers,
+        deleteGroupIds: deleteGroupIds,
+      );
+      try {
+        await NotificationService.instance.forgetAccount(user.uid);
+      } catch (_) {
+        // The server has already deleted the account; local preference cleanup
+        // must not turn a successful deletion into a reported failure.
+      }
+      await _auth.signOut();
       _setBusy(false);
       return null;
     } on FirebaseAuthException catch (e) {
       _setBusy(false);
       return _friendlyError(e);
+    } on FirebaseFunctionsException catch (e) {
+      _setBusy(false);
+      return e.message ?? 'Account deletion did not finish. Sign in and retry.';
     } catch (_) {
       _setBusy(false);
       return 'Failed to delete account.';

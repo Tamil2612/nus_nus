@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
+import '../data/account_deletion_repository.dart';
 import '../providers/auth_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -21,13 +22,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final _newPasswordCtrl = TextEditingController();
 
   bool _isObscure = true;
+  bool _isPreparingDeletion = false;
 
   @override
   void initState() {
     super.initState();
     final auth = context.read<AuthProvider>();
     auth.reloadUser(); // Refresh user state from server
-    
+
     final user = auth.currentUser;
     final profile = auth.appUser;
     _nameCtrl.text = user?.displayName ?? '';
@@ -79,8 +81,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final currentPassword = await _promptForPassword();
     if (currentPassword == null) return;
 
-    final error =
-        await auth.updatePassword(_newPasswordCtrl.text.trim(), currentPassword);
+    final error = await auth.updatePassword(
+        _newPasswordCtrl.text.trim(), currentPassword);
     if (!mounted) return;
     if (error != null) {
       _showSnack(error, isError: true);
@@ -90,14 +92,52 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  Future<void> _deleteAccount(AuthProvider auth) async {
+    if (_isPreparingDeletion || auth.isBusy) return;
+    setState(() => _isPreparingDeletion = true);
+    AccountDeletionPlan plan;
+    try {
+      plan = await AccountDeletionRepository.instance.getPlan();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isPreparingDeletion = false);
+        _showSnack('Could not load your groups. Please try again.',
+            isError: true);
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _isPreparingDeletion = false);
+
+    final choice = await showDialog<_AccountDeletionChoice>(
+      context: context,
+      builder: (_) => _AccountDeletionDialog(plan: plan),
+    );
+    if (choice == null || !mounted) return;
+
+    final password = await _promptForPassword();
+    if (password == null || !mounted) return;
+
+    final error = await auth.deleteAccount(
+      currentPassword: password,
+      transfers: choice.transfers,
+      deleteGroupIds: choice.deleteGroupIds,
+    );
+    if (!mounted) return;
+    if (error != null) {
+      _showSnack(error, isError: true);
+    }
+  }
+
   Future<String?> _promptForPassword() async {
     final ctrl = TextEditingController();
-    return showDialog<String>(
+    final password = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.paper,
         title: const Text('Confirm Identity',
-            style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+            style:
+                TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -125,6 +165,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ],
       ),
     );
+    ctrl.dispose();
+    return password;
   }
 
   void _showSnack(String message, {bool isError = false}) {
@@ -191,7 +233,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: auth.isBusy ? null : () => _updateBasicInfo(auth),
+                        onPressed:
+                            auth.isBusy ? null : () => _updateBasicInfo(auth),
                         style: AppTheme.solidButton,
                         child: const Text('Save Info'),
                       ),
@@ -214,7 +257,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton(
-                        onPressed: auth.isBusy ? null : () => _updateEmail(auth),
+                        onPressed:
+                            auth.isBusy ? null : () => _updateEmail(auth),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.ink,
                           side: const BorderSide(color: AppColors.line),
@@ -251,7 +295,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton(
-                        onPressed: auth.isBusy ? null : () => _updatePassword(auth),
+                        onPressed:
+                            auth.isBusy ? null : () => _updatePassword(auth),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.ink,
                           side: const BorderSide(color: AppColors.line),
@@ -264,11 +309,66 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   ],
                 ),
+                32.verticalSpace,
+                const _SectionTitle(title: 'DANGER ZONE'),
+                16.verticalSpace,
+                _buildCard(
+                  children: [
+                    Text(
+                      'Delete account',
+                      style: TextStyle(
+                        color: AppColors.rust,
+                        fontSize: 16.sp,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    8.verticalSpace,
+                    Text(
+                      'Your personal ledger and profile will be deleted. Shared history will be kept and former-member names anonymized. You will choose who takes ownership of each group.',
+                      style: TextStyle(
+                        color: AppColors.slate,
+                        fontSize: 12.sp,
+                        height: 1.4,
+                      ),
+                    ),
+                    16.verticalSpace,
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: auth.isBusy || _isPreparingDeletion
+                            ? null
+                            : () => _deleteAccount(auth),
+                        icon: _isPreparingDeletion
+                            ? SizedBox(
+                                width: 16.r,
+                                height: 16.r,
+                                child: const CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.rust,
+                                ),
+                              )
+                            : const Icon(Icons.delete_forever_outlined),
+                        label: Text(_isPreparingDeletion
+                            ? 'Preparing…'
+                            : 'Delete account'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.rust,
+                          side: const BorderSide(color: AppColors.rust),
+                          padding: EdgeInsets.symmetric(vertical: 12.h),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12.r),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 if (auth.isBusy)
                   Padding(
                     padding: EdgeInsets.only(top: 24.h),
                     child: const Center(
-                        child: CircularProgressIndicator(color: AppColors.brass)),
+                        child:
+                            CircularProgressIndicator(color: AppColors.brass)),
                   ),
               ],
             ),
@@ -285,7 +385,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         color: AppColors.paper,
         borderRadius: BorderRadius.circular(20.r),
         boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
         ],
       ),
       child: Column(children: children),
@@ -307,5 +408,510 @@ class _SectionTitle extends StatelessWidget {
           fontWeight: FontWeight.w900,
           letterSpacing: 1.2),
     );
+  }
+}
+
+class _AccountDeletionChoice {
+  final Map<String, String> transfers;
+  final List<String> deleteGroupIds;
+
+  const _AccountDeletionChoice({
+    required this.transfers,
+    required this.deleteGroupIds,
+  });
+}
+
+class _AccountDeletionDialog extends StatefulWidget {
+  final AccountDeletionPlan plan;
+
+  const _AccountDeletionDialog({required this.plan});
+
+  @override
+  State<_AccountDeletionDialog> createState() => _AccountDeletionDialogState();
+}
+
+class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
+  final Map<String, String> _transfers = {};
+  final Set<String> _deleteGroupIds = {};
+  bool _confirmed = false;
+
+  bool get _canContinue =>
+      _confirmed &&
+      widget.plan.ownedGroups.every(
+        (group) =>
+            _deleteGroupIds.contains(group.id) ||
+            _transfers.containsKey(group.id),
+      );
+
+  void _finish() {
+    if (!_canContinue) return;
+    Navigator.of(context).pop(
+      _AccountDeletionChoice(
+        transfers: Map.of(_transfers),
+        deleteGroupIds: _deleteGroupIds.toList(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final dialogWidth = (screen.width - 36).clamp(0.0, 480.0).toDouble();
+    return Dialog(
+      backgroundColor: AppColors.paper,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: EdgeInsets.symmetric(horizontal: 18.w, vertical: 20.h),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24.r)),
+      child: SizedBox(
+        width: dialogWidth,
+        height: screen.height * 0.84,
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(20.w, 20.h, 14.w, 12.h),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44.r,
+                    height: 44.r,
+                    decoration: BoxDecoration(
+                      color: AppColors.rust.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14.r),
+                    ),
+                    child: Icon(Icons.person_remove_alt_1_outlined,
+                        color: AppColors.rust, size: 23.r),
+                  ),
+                  12.horizontalSpace,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Delete account',
+                          style: TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 19.sp,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        4.verticalSpace,
+                        Text(
+                          'Review what happens to your shared groups.',
+                          style: TextStyle(
+                            color: AppColors.slate,
+                            fontSize: 11.sp,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Cancel',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: Icon(Icons.close, color: AppColors.slate, size: 21.r),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: AppColors.line),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(18.w, 14.h, 18.w, 10.h),
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(12.w),
+                    decoration: BoxDecoration(
+                      color: AppColors.brassSoft.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(14.r),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline,
+                            color: AppColors.ink, size: 18.r),
+                        9.horizontalSpace,
+                        Expanded(
+                          child: Text(
+                            'Your account and personal ledger will be removed. Shared group history stays, with your old name shown as “Former member”.',
+                            style: TextStyle(
+                              color: AppColors.ink,
+                              fontSize: 11.sp,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  16.verticalSpace,
+                  if (widget.plan.ownedGroups.isEmpty)
+                    _buildEmptyGroups()
+                  else ...[
+                    Text(
+                      'GROUPS YOU OWN',
+                      style: TextStyle(
+                        color: AppColors.slate,
+                        fontSize: 10.sp,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    4.verticalSpace,
+                    for (final group in widget.plan.ownedGroups)
+                      _buildGroupChoice(group),
+                  ],
+                ],
+              ),
+            ),
+            Container(
+              padding: EdgeInsets.fromLTRB(18.w, 10.h, 18.w, 16.h),
+              decoration: BoxDecoration(
+                color: AppColors.paper,
+                border: Border(top: BorderSide(color: AppColors.line)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(24.r),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(12.r),
+                    onTap: () => setState(() => _confirmed = !_confirmed),
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 5.h),
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            value: _confirmed,
+                            activeColor: AppColors.rust,
+                            side:
+                                BorderSide(color: AppColors.slate, width: 1.5),
+                            onChanged: (value) =>
+                                setState(() => _confirmed = value ?? false),
+                          ),
+                          4.horizontalSpace,
+                          Expanded(
+                            child: Text(
+                              'I understand this deletion is permanent.',
+                              style: TextStyle(
+                                color: AppColors.ink,
+                                fontSize: 11.sp,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  8.verticalSpace,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.ink,
+                            side: BorderSide(color: AppColors.line),
+                            padding: EdgeInsets.symmetric(vertical: 12.h),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12.r),
+                            ),
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      10.horizontalSpace,
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _canContinue ? _finish : null,
+                          icon: Icon(Icons.arrow_forward, size: 17.r),
+                          label: const Text('Continue'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.ink,
+                            foregroundColor: AppColors.paper,
+                            disabledBackgroundColor: AppColors.paperDim,
+                            disabledForegroundColor: AppColors.slate,
+                            padding: EdgeInsets.symmetric(vertical: 12.h),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12.r),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupChoice(AccountDeletionGroup group) {
+    final deleting = _deleteGroupIds.contains(group.id);
+    return Container(
+      margin: EdgeInsets.only(top: 10.h),
+      padding: EdgeInsets.all(13.w),
+      decoration: BoxDecoration(
+        color: AppColors.paper,
+        borderRadius: BorderRadius.circular(16.r),
+        border: Border.all(color: AppColors.line, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.ink.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32.r,
+                height: 32.r,
+                decoration: BoxDecoration(
+                  color: AppColors.ink,
+                  borderRadius: BorderRadius.circular(10.r),
+                ),
+                child: Icon(Icons.groups_outlined,
+                    color: AppColors.brassSoft, size: 17.r),
+              ),
+              10.horizontalSpace,
+              Expanded(
+                child: Text(
+                  group.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 13.sp,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (group.candidates.isNotEmpty) ...[
+            12.verticalSpace,
+            Text(
+              'NEW GROUP OWNER',
+              style: TextStyle(
+                color: AppColors.slate,
+                fontSize: 9.sp,
+                letterSpacing: 0.7,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            6.verticalSpace,
+            _buildOwnerPicker(group, deleting),
+          ] else ...[
+            Container(
+              margin: EdgeInsets.only(top: 10.h),
+              padding: EdgeInsets.all(10.w),
+              decoration: BoxDecoration(
+                color: AppColors.brassSoft.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(11.r),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: AppColors.ink, size: 16.r),
+                  7.horizontalSpace,
+                  Expanded(
+                    child: Text(
+                      'No eligible member can take ownership. Delete this group or cancel account deletion.',
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 10.sp,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          10.verticalSpace,
+          InkWell(
+            borderRadius: BorderRadius.circular(12.r),
+            onTap: () => _setDeleteChoice(group.id, !deleting),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
+              decoration: BoxDecoration(
+                color: deleting
+                    ? AppColors.rust.withValues(alpha: 0.10)
+                    : AppColors.paperDim.withValues(alpha: 0.58),
+                borderRadius: BorderRadius.circular(12.r),
+                border: Border.all(
+                  color: deleting
+                      ? AppColors.rust.withValues(alpha: 0.45)
+                      : AppColors.line,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: deleting,
+                    activeColor: AppColors.rust,
+                    side: BorderSide(color: AppColors.slate, width: 1.4),
+                    onChanged: (value) =>
+                        _setDeleteChoice(group.id, value ?? false),
+                  ),
+                  4.horizontalSpace,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Delete this group',
+                          style: TextStyle(
+                            color: AppColors.rust,
+                            fontSize: 11.sp,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'Permanently remove its history',
+                          style: TextStyle(
+                            color: AppColors.slate,
+                            fontSize: 9.sp,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.delete_outline, color: AppColors.rust, size: 18.r),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOwnerPicker(AccountDeletionGroup group, bool deleting) {
+    final selectedUid = _transfers[group.id];
+    final selected = group.candidates
+        .where((candidate) => candidate.uid == selectedUid)
+        .firstOrNull;
+    return Opacity(
+      opacity: deleting ? 0.48 : 1,
+      child: PopupMenuButton<String>(
+        enabled: !deleting,
+        onSelected: (uid) => setState(() => _transfers[group.id] = uid),
+        color: AppColors.paper,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14.r),
+        ),
+        itemBuilder: (context) => group.candidates
+            .map((candidate) => PopupMenuItem<String>(
+                  value: candidate.uid,
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 14.r,
+                        backgroundColor: AppColors.ink,
+                        child: Text(
+                          candidate.name.isEmpty
+                              ? '?'
+                              : candidate.name.characters.first.toUpperCase(),
+                          style: TextStyle(
+                            color: AppColors.paper,
+                            fontSize: 11.sp,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      10.horizontalSpace,
+                      Expanded(
+                        child: Text(
+                          candidate.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 12.sp,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ))
+            .toList(),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
+          decoration: BoxDecoration(
+            color: AppColors.paperDim,
+            borderRadius: BorderRadius.circular(12.r),
+            border: Border.all(
+              color: selected == null ? AppColors.line : AppColors.brass,
+              width: selected == null ? 1 : 1.5,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.swap_horiz, color: AppColors.ink, size: 19.r),
+              9.horizontalSpace,
+              Expanded(
+                child: Text(
+                  selected?.name ?? 'Choose a group owner',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 12.sp,
+                    fontWeight:
+                        selected == null ? FontWeight.w500 : FontWeight.w700,
+                  ),
+                ),
+              ),
+              Icon(Icons.keyboard_arrow_down, color: AppColors.ink, size: 20.r),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyGroups() {
+    return Container(
+      padding: EdgeInsets.all(14.w),
+      decoration: BoxDecoration(
+        color: AppColors.paperDim,
+        borderRadius: BorderRadius.circular(14.r),
+      ),
+      child: Text(
+        'You do not own any shared groups that need an ownership decision.',
+        style: TextStyle(
+          color: AppColors.ink,
+          fontSize: 12.sp,
+          height: 1.4,
+        ),
+      ),
+    );
+  }
+
+  void _setDeleteChoice(String groupId, bool deleting) {
+    setState(() {
+      if (deleting) {
+        _deleteGroupIds.add(groupId);
+        _transfers.remove(groupId);
+      } else {
+        _deleteGroupIds.remove(groupId);
+      }
+    });
   }
 }

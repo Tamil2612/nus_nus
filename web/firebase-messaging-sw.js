@@ -27,11 +27,29 @@ messaging.onBackgroundMessage((payload) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL('/', self.location.origin).href;
+  const data = event.notification.data || {};
+  const targetUrl = new URL('/', self.location.origin);
+  if (data.type === 'expense_created' || data.type === 'group_message') {
+    for (const key of ['type', 'groupId', 'expenseId', 'messageId']) {
+      if (typeof data[key] === 'string' && data[key].length > 0) {
+        targetUrl.searchParams.set(`push_${key}`, data[key]);
+      }
+    }
+  }
+  const target = targetUrl.href;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if ('focus' in client) return client.focus();
+      const appClient = clients.find((client) => {
+        try {
+          return new URL(client.url).origin === self.location.origin;
+        } catch (_) {
+          return false;
+        }
+      });
+      if (appClient && 'navigate' in appClient) {
+        return appClient.navigate(target)
+          .then((navigatedClient) => (navigatedClient || appClient).focus())
+          .catch(() => self.clients.openWindow(target));
       }
       return self.clients.openWindow(target);
     }),

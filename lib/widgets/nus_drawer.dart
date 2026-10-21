@@ -310,6 +310,27 @@ class _NotificationOptInTileState extends State<_NotificationOptInTile> {
     });
   }
 
+  Future<void> _disable() async {
+    if (_isEnabling) return;
+    setState(() => _isEnabling = true);
+    final result =
+        await NotificationService.instance.disableNotifications(widget.uid);
+    if (!mounted) return;
+    setState(() {
+      _isEnabling = false;
+      _result = result;
+      _statusFuture = Future.value(result);
+    });
+  }
+
+  Future<void> _setEnabled(bool enabled) async {
+    if (enabled) {
+      await _enable();
+    } else {
+      await _disable();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<NotificationEnableResult>(
@@ -340,6 +361,9 @@ class _NotificationOptInTileState extends State<_NotificationOptInTile> {
         } else if (missingConfig) {
           description =
               'Web Push is not configured for this build. Set FIREBASE_VAPID_KEY and rebuild.';
+        } else if (status == NotificationEnableStatus.permissionRequired &&
+            result?.message != null) {
+          description = result!.message!;
         } else if (result?.status ==
             NotificationEnableStatus.registrationFailed) {
           description = kIsWeb
@@ -355,6 +379,7 @@ class _NotificationOptInTileState extends State<_NotificationOptInTile> {
             !unsupported &&
             !missingConfig &&
             !denied;
+        final canToggle = !loadingStatus && (enabled || canEnable);
 
         return Container(
           margin: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
@@ -387,8 +412,15 @@ class _NotificationOptInTileState extends State<_NotificationOptInTile> {
                       ),
                     ),
                   ),
-                  if (enabled)
-                    Icon(Icons.check_circle, color: AppColors.sage, size: 19.r),
+                  Switch.adaptive(
+                    value: enabled,
+                    onChanged: canToggle ? _setEnabled : null,
+                    activeThumbColor: AppColors.paper,
+                    activeTrackColor: AppColors.brass,
+                    inactiveThumbColor: AppColors.slate,
+                    inactiveTrackColor: AppColors.paperDim,
+                    trackOutlineColor: WidgetStatePropertyAll(AppColors.line),
+                  ),
                 ],
               ),
               7.verticalSpace,
@@ -403,24 +435,6 @@ class _NotificationOptInTileState extends State<_NotificationOptInTile> {
               if (_isEnabling) ...[
                 12.verticalSpace,
                 const LinearProgressIndicator(color: AppColors.brass),
-              ] else if (canEnable) ...[
-                10.verticalSpace,
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _enable,
-                    icon: const Icon(Icons.notifications_active_outlined),
-                    label: const Text('Enable notifications'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.ink,
-                      foregroundColor: AppColors.paper,
-                      padding: EdgeInsets.symmetric(vertical: 11.h),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12.r),
-                      ),
-                    ),
-                  ),
-                ),
               ] else if (denied) ...[
                 TextButton.icon(
                   onPressed: () => setState(_refreshStatus),
@@ -445,7 +459,7 @@ class _NotificationOptInTileState extends State<_NotificationOptInTile> {
                       'On iOS/iPadOS 16.4 or later: open Nus·Nus in Safari, '
                       'tap Share → Add to Home Screen, enable “Open as Web App” '
                       'if shown, then launch the Home Screen app, sign in, and '
-                      'tap Enable notifications. Installing it does not open '
+                      'turn on Notifications here. Installing it does not open '
                       'the permission prompt by itself.',
                       style: TextStyle(
                         color: AppColors.slate,

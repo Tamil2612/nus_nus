@@ -8,7 +8,7 @@ import '../models/app_user.dart';
 class MemberDirectoryRepository {
   MemberDirectoryRepository._();
   static final MemberDirectoryRepository instance =
-  MemberDirectoryRepository._();
+      MemberDirectoryRepository._();
 
   CollectionReference<Map<String, dynamic>> get _users =>
       FirebaseFirestore.instance.collection('users');
@@ -20,7 +20,8 @@ class MemberDirectoryRepository {
       final users = snap.docs
           .map((d) => AppUser.fromJson({'uid': d.id, ...d.data()}))
           .toList();
-      users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      users
+          .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       return users;
     } catch (e, st) {
       debugPrint('MemberDirectoryRepository.fetchAll failed: $e\n$st');
@@ -34,7 +35,8 @@ class MemberDirectoryRepository {
       final users = snap.docs
           .map((d) => AppUser.fromJson({'uid': d.id, ...d.data()}))
           .toList();
-      users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      users
+          .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       return users;
     }).handleError((e) {
       debugPrint('MemberDirectoryRepository.watchAll error: $e');
@@ -72,16 +74,6 @@ class MemberDirectoryRepository {
       await _users.doc(user.uid).set(data, SetOptions(merge: true));
     } catch (e, st) {
       debugPrint('MemberDirectoryRepository.upsertProfile failed: $e\n$st');
-    }
-  }
-
-  /// Removes the public profile (account deletion).
-  Future<void> deleteProfile(String uid) async {
-    try {
-      await _users.doc(uid).delete();
-    } catch (e, st) {
-      debugPrint('MemberDirectoryRepository.deleteProfile failed: $e\n$st');
-      rethrow;
     }
   }
 }

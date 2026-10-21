@@ -2,6 +2,12 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
+    function accountCanWrite() {
+      return signedIn() &&
+        (!firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) ||
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data
+            .get('accountDeletionInProgress', false) != true);
+    }
     function groupData(groupId) {
       return firestore.get(/databases/(default)/documents/groups/$(groupId)).data;
     }
@@ -16,13 +22,13 @@ service firebase.storage {
 
     match /groups/{groupId}/chat/{uid}/{fileName} {
       allow read: if isGroupMember(groupId);
-      allow create: if isGroupMember(groupId) &&
+      allow create: if accountCanWrite() && isGroupMember(groupId) &&
         request.auth.uid == uid &&
         request.resource.size > 0 &&
         request.resource.size <= 5 * 1024 * 1024 &&
         request.resource.contentType == 'image/jpeg';
       allow update: if false;
-      allow delete: if isGroupMember(groupId) &&
+      allow delete: if accountCanWrite() && isGroupMember(groupId) &&
         (request.auth.uid == uid || isGroupOwner(groupId));
     }
     match /{allPaths=**} {

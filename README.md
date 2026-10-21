@@ -47,6 +47,7 @@ Always review AI-generated amounts and receipt details before saving them.
 - Support group currencies, including AED.
 - Use Firebase Cloud Messaging for configured notifications.
 - Keep notification tokens in private user documents.
+- Delete accounts through the trusted account-cleanup function. Personal ledgers and profile data are removed; shared groups require an ownership transfer or explicit deletion, while retained shared history is anonymized.
 
 ### 🛡️ Security and reliability
 - Firebase Authentication protects signed-in workflows.
@@ -188,6 +189,7 @@ Important manual scenarios:
 - Upload and view images as a group member; verify unauthorized users cannot read them.
 - Test notification delivery and tap-to-open navigation.
 - Delete a group and verify the related chat data and Storage objects are cleaned up.
+- Delete an account with owned groups; verify ownership choices are enforced, retained groups stay usable, and former-member labels replace identifying names.
 - Test expense creation, balance calculations, and settlement validation.
 - Confirm loading indicators and error states behave correctly on slow or failed requests.
 
