@@ -10,6 +10,7 @@ import '../utils/currency_formatter.dart';
 import '../widgets/header_bar.dart';
 import '../widgets/people_tab.dart';
 import '../widgets/nus_drawer.dart';
+import '../widgets/app_dialog.dart';
 import 'ai_expense_screen.dart';
 import 'group_detail_screen.dart';
 import 'personal_ledger_screen.dart';
@@ -51,20 +52,26 @@ class _LandingScreenState extends State<LandingScreen>
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (context, setDialogState) {
-        return AlertDialog(
-          backgroundColor: AppColors.paper,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-          title: const Text('New Group',
-              style:
-                  TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+        return AppDialog(
+          icon: Icons.group_add_outlined,
+          iconColor: AppColors.brass,
+          title: 'New Group',
+          confirmText: 'Create',
+          confirmColor: AppColors.brass,
+          onConfirm: () {
+            if (ctrl.text.trim().isNotEmpty) {
+              provider.addGroup(ctrl.text,
+                  ownerName: ownerName, currency: selectedCurrency);
+              Navigator.pop(ctx);
+            }
+          },
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: ctrl,
                 autofocus: true,
-                style: TextStyle(color: AppColors.ink, fontSize: 16.sp),
+                style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
                 decoration:
                     AppTheme.inputDecoration('Group Name (e.g. Vacation)')
                         .copyWith(filled: false),
@@ -75,7 +82,7 @@ class _LandingScreenState extends State<LandingScreen>
                 dropdownColor: AppColors.paper,
                 style: TextStyle(
                     color: AppColors.ink,
-                    fontSize: 16.sp,
+                    fontSize: 15.sp,
                     fontWeight: FontWeight.bold),
                 decoration: AppTheme.inputDecoration('Currency').copyWith(
                   prefixIcon: Icon(Icons.payments_outlined,
@@ -105,27 +112,6 @@ class _LandingScreenState extends State<LandingScreen>
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.slate)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (ctrl.text.trim().isNotEmpty) {
-                  provider.addGroup(ctrl.text,
-                      ownerName: ownerName, currency: selectedCurrency);
-                  Navigator.pop(ctx);
-                }
-              },
-              style: AppTheme.solidButton.copyWith(
-                padding: WidgetStateProperty.all(
-                    EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h)),
-              ),
-              child: const Text('Create'),
-            ),
-          ],
         );
       }),
     );
@@ -139,20 +125,26 @@ class _LandingScreenState extends State<LandingScreen>
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (context, setDialogState) {
-        return AlertDialog(
-          backgroundColor: AppColors.paper,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-          title: const Text('Rename Group',
-              style:
-                  TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+        return AppDialog(
+          icon: Icons.edit_outlined,
+          iconColor: AppColors.brass,
+          title: 'Rename Group',
+          confirmText: 'Save',
+          confirmColor: AppColors.brass,
+          onConfirm: () {
+            if (ctrl.text.trim().isNotEmpty) {
+              provider.renameGroup(groupId, ctrl.text.trim(),
+                  newCurrency: selectedCurrency);
+              Navigator.pop(ctx);
+            }
+          },
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: ctrl,
                 autofocus: true,
-                style: TextStyle(color: AppColors.ink, fontSize: 16.sp),
+                style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
                 decoration: AppTheme.inputDecoration('Group Name').copyWith(
                   filled: false,
                 ),
@@ -163,7 +155,7 @@ class _LandingScreenState extends State<LandingScreen>
                 dropdownColor: AppColors.paper,
                 style: TextStyle(
                     color: AppColors.ink,
-                    fontSize: 16.sp,
+                    fontSize: 15.sp,
                     fontWeight: FontWeight.bold),
                 decoration: AppTheme.inputDecoration('Currency').copyWith(
                   prefixIcon: Icon(Icons.payments_outlined,
@@ -193,27 +185,6 @@ class _LandingScreenState extends State<LandingScreen>
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.slate)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (ctrl.text.trim().isNotEmpty) {
-                  provider.renameGroup(groupId, ctrl.text.trim(),
-                      newCurrency: selectedCurrency);
-                  Navigator.pop(ctx);
-                }
-              },
-              style: AppTheme.solidButton.copyWith(
-                padding: WidgetStateProperty.all(
-                    EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h)),
-              ),
-              child: const Text('Save'),
-            ),
-          ],
         );
       }),
     );

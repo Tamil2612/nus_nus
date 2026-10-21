@@ -173,6 +173,7 @@ class AuthProvider extends ChangeNotifier {
     required String currentPassword,
     required Map<String, String> transfers,
     required List<String> deleteGroupIds,
+    required bool acknowledgeUnsettled,
   }) async {
     final user = _user;
     final email = user?.email;
@@ -196,6 +197,7 @@ class AuthProvider extends ChangeNotifier {
       await AccountDeletionRepository.instance.deleteAccount(
         transfers: transfers,
         deleteGroupIds: deleteGroupIds,
+        acknowledgeUnsettled: acknowledgeUnsettled,
       );
       try {
         await NotificationService.instance.forgetAccount(user.uid);
@@ -227,7 +229,11 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> updateProfile({String? name, String? phoneNumber}) async {
+  Future<String?> updateProfile({
+    String? name,
+    String? phoneNumber,
+    bool? discoverableByPhone,
+  }) async {
     final uid = _user?.uid;
     if (uid == null) return 'No user signed in.';
     _setBusy(true);
@@ -244,6 +250,7 @@ class AuthProvider extends ChangeNotifier {
           name: name ?? _user?.displayName ?? '',
           email: _user?.email ?? '',
           phoneNumber: phoneNumber,
+          discoverableByPhone: discoverableByPhone,
         ),
       );
       await _fetchAppUser(uid);

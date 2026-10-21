@@ -17,7 +17,7 @@ import '../providers/split_provider.dart';
 import '../screens/ai_expense_screen.dart';
 import '../screens/expense_detail_screen.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
+import 'app_dialog.dart';
 import '../utils/currency_formatter.dart';
 import 'expense_form_sheet.dart';
 
@@ -914,42 +914,16 @@ class _MessageBubble extends StatelessWidget {
 
   Future<void> _confirmDeleteMessage(
       BuildContext context, String groupId, bool isImage) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20.r),
-        ),
-        title: Text(
-          isImage ? 'Delete image?' : 'Delete message?',
-          style: TextStyle(
-            color: AppColors.ink,
-            fontWeight: FontWeight.bold,
-            fontSize: 18.sp,
-          ),
-        ),
-        content: Text(
-          isImage
-              ? 'This photo will be permanently deleted from the group chat.'
-              : 'This message will be permanently deleted from the group chat.',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child:
-                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: isImage ? Icons.image_not_supported_outlined : Icons.delete_outline_rounded,
+      iconColor: AppColors.rust,
+      title: isImage ? 'Delete image?' : 'Delete message?',
+      message: isImage
+          ? 'This photo will be permanently deleted from the group chat.'
+          : 'This message will be permanently deleted from the group chat.',
+      confirmText: 'Delete',
+      confirmColor: AppColors.rust,
     );
 
     if (confirmed == true && context.mounted) {

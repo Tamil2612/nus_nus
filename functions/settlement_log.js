@@ -63,6 +63,62 @@ function settlementAllocationTargets({ reverseCents, legacyForwardCents, legacyR
   };
 }
 
+// Returns a person's signed group balance in major currency units: positive
+// means the group owes them, negative means they owe the group. This mirrors
+// SettlementCalculator's ledger rules, including partial settlements and
+// legacy negative settlement cards.
+function netBalanceForPerson(expenses, personId) {
+  const targetId = String(personId);
+  let balanceCents = 0;
+
+  const outstandingCents = (expense, id) => {
+    const key = String(id);
+    const splits = expense && expense.splitMap || {};
+    const share = Number(splits[key] ?? splits[id] ?? 0);
+    if (!Number.isFinite(share) || share <= 0) return 0;
+
+    const settledBy = expense.settledBy;
+    const fullySettled = Array.isArray(settledBy)
+      ? settledBy.map(String).includes(key)
+      : !!(settledBy && settledBy[key] === true);
+    if (fullySettled) return 0;
+
+    const settledAmounts = expense.settledAmounts || {};
+    const already = Number(settledAmounts[key] ?? 0);
+    const outstanding = Math.max(0, Math.round((share - (Number.isFinite(already) ? already : 0)) * 100));
+    return outstanding;
+  };
+
+  for (const expense of Array.isArray(expenses) ? expenses : []) {
+    if (!expense || typeof expense !== 'object') continue;
+    const payerId = String(expense.payerId);
+    const splits = expense.splitMap || {};
+
+    if (expense.isSettlement === true) {
+      // Legacy settlement cards represent a negative ledger entry from the
+      // payer (debtor) to each person in splitMap (creditor).
+      for (const [creditorId, amount] of Object.entries(splits)) {
+        const cents = Math.round(Number(amount) * 100);
+        if (creditorId === payerId || !Number.isFinite(cents) || cents <= 0) continue;
+        if (payerId === targetId) balanceCents += cents;
+        if (creditorId === targetId) balanceCents -= cents;
+      }
+      continue;
+    }
+
+    if (payerId === targetId) {
+      for (const [debtorId] of Object.entries(splits)) {
+        if (debtorId === payerId) continue;
+        balanceCents += outstandingCents(expense, debtorId);
+      }
+    } else {
+      balanceCents -= outstandingCents(expense, targetId);
+    }
+  }
+
+  return Math.round(balanceCents) / 100;
+}
+
 // Either person in the debtor/creditor pair may undo a settlement.
 function canRevert(log, uid) {
   if (!log || !uid) return false;
@@ -70,4 +126,10 @@ function canRevert(log, uid) {
   return uids.includes(uid);
 }
 
-module.exports = { groupAllocationsByExpense, subtractAllocations, canRevert, settlementAllocationTargets };
+module.exports = {
+  groupAllocationsByExpense,
+  subtractAllocations,
+  canRevert,
+  settlementAllocationTargets,
+  netBalanceForPerson,
+};

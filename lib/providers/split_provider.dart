@@ -422,7 +422,10 @@ class SplitProvider extends ChangeNotifier {
   }
 
   /// Leaves the selected shared group. Owners must transfer ownership first.
-  Future<void> leaveCurrentGroup({String? transferToUid}) async {
+  Future<void> leaveCurrentGroup({
+    String? transferToUid,
+    bool acknowledgeUnsettled = false,
+  }) async {
     final group = currentGroup;
     if (group == null || group.isPersonal) {
       throw StateError('There is no shared group to leave.');
@@ -430,6 +433,7 @@ class SplitProvider extends ChangeNotifier {
     await FirestoreRepository.instance.leaveGroup(
       group.id,
       transferToUid: transferToUid,
+      acknowledgeUnsettled: acknowledgeUnsettled,
     );
 
     _groupMeta = _groupMeta.where((item) => item.id != group.id).toList();
@@ -1047,8 +1051,14 @@ class SplitProvider extends ChangeNotifier {
         // Flip to "from my perspective": positive = they owe me.
         final signedFromMe = pb.personAId == myId ? -pb.amount : pb.amount;
 
+        // People who left or deleted their account all show as "Former
+        // member"; keep them separate per group instead of merging by name.
+        final isFormerMember =
+            counterpart.archived && counterpart.name == 'Former member';
         final key = counterpart.linkedUserId ??
-            'name:${counterpart.name.trim().toLowerCase()}';
+            (isFormerMember
+                ? 'former:${g.id}:${counterpart.id}'
+                : 'name:${counterpart.name.trim().toLowerCase()}');
 
         displayNames.putIfAbsent(key, () => counterpart!.name.trim());
         if (seenInThisGroup.add(key)) {

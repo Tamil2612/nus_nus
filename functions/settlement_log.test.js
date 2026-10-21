@@ -7,6 +7,7 @@ const {
   subtractAllocations,
   canRevert,
   settlementAllocationTargets,
+  netBalanceForPerson,
 } = require('./settlement_log');
 
 test('groups allocations per expense and person, ignoring junk entries', () => {
@@ -124,4 +125,39 @@ test('allocation targets reject impossible legacy reverse totals', () => {
     legacyReverseCents: 200,
     requestedCents: 0,
   }), RangeError);
+});
+
+test('netBalanceForPerson counts outstanding shares and partial settlements', () => {
+  const expenses = [
+    {
+      payerId: 1,
+      splitMap: { 1: 10, 2: 25, 3: 15 },
+      settledAmounts: { 2: 5 },
+    },
+    {
+      payerId: 2,
+      splitMap: { 1: 8, 2: 8 },
+      settledBy: ['1'],
+    },
+  ];
+  assert.equal(netBalanceForPerson(expenses, 1), 35);
+  assert.equal(netBalanceForPerson(expenses, 2), -20);
+  assert.equal(netBalanceForPerson(expenses, 3), -15);
+});
+
+test('netBalanceForPerson applies legacy settlement cards as negative debts', () => {
+  const expenses = [
+    { payerId: 2, splitMap: { 1: 40 }, isSettlement: true },
+    { payerId: 1, splitMap: { 2: 10 }, isSettlement: true },
+  ];
+  assert.equal(netBalanceForPerson(expenses, 1), -30);
+  assert.equal(netBalanceForPerson(expenses, 2), 30);
+});
+
+test('netBalanceForPerson ignores the payer share and malformed input', () => {
+  assert.equal(netBalanceForPerson([
+    { payerId: 1, splitMap: { 1: 100, 2: 2.345 } },
+    null,
+  ], 1), 2.35);
+  assert.equal(netBalanceForPerson([], 1), 0);
 });

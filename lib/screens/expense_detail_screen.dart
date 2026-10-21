@@ -5,8 +5,8 @@ import '../models/expense.dart';
 import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/expense_form_sheet.dart';
 
 class ExpenseDetailScreen extends StatelessWidget {
@@ -32,38 +32,16 @@ class ExpenseDetailScreen extends StatelessWidget {
       );
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: Text(isSettlement ? 'Revert settlement?' : 'Delete this split?',
-            style: const TextStyle(
-                color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: Text(
-          isSettlement
-              ? 'This will remove the payment record and restore the previous balances. '
-                  'This action cannot be undone.'
-              : 'This will permanently remove this expense from the group record. '
-                  'This action cannot be undone.',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child:
-                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: Text(isSettlement ? 'Revert' : 'Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: isSettlement ? Icons.undo_rounded : Icons.delete_outline_rounded,
+      iconColor: AppColors.rust,
+      title: isSettlement ? 'Revert settlement?' : 'Delete this split?',
+      message: isSettlement
+          ? 'This will remove the payment record and restore the previous balances. This action cannot be undone.'
+          : 'This will permanently remove this expense from the group record. This action cannot be undone.',
+      confirmText: isSettlement ? 'Revert' : 'Delete',
+      confirmColor: AppColors.rust,
     );
 
     if (confirmed == true) {

@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/phone_input_field.dart';
+import '../widgets/app_dialog.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -19,10 +20,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _newPasswordCtrl = TextEditingController();
-
-  bool _isObscure = true;
-  bool _isPreparingDeletion = false;
+  bool _discoverableByPhone = true;
+  bool _discoverabilityChanged = false;
 
   @override
   void initState() {
@@ -35,6 +34,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameCtrl.text = user?.displayName ?? '';
     _emailCtrl.text = user?.email ?? '';
     _phoneCtrl.text = profile?.phoneNumber ?? '';
+    _discoverableByPhone = profile?.discoverableByPhone ?? true;
   }
 
   @override
@@ -42,7 +42,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
-    _newPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -50,6 +49,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final error = await auth.updateProfile(
       name: _nameCtrl.text.trim(),
       phoneNumber: _phoneKey.currentState?.fullNumber ?? _phoneCtrl.text.trim(),
+      discoverableByPhone:
+          _discoverabilityChanged ? _discoverableByPhone : null,
     );
     if (!mounted) return;
     if (error != null) {
@@ -72,97 +73,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  Future<void> _updatePassword(AuthProvider auth) async {
-    if (_newPasswordCtrl.text.length < 6) {
-      _showSnack('Password must be at least 6 characters.', isError: true);
-      return;
-    }
-
-    final currentPassword = await _promptForPassword();
-    if (currentPassword == null) return;
-
-    final error = await auth.updatePassword(
-        _newPasswordCtrl.text.trim(), currentPassword);
-    if (!mounted) return;
-    if (error != null) {
-      _showSnack(error, isError: true);
-    } else {
-      _newPasswordCtrl.clear();
-      _showSnack('Password changed successfully!');
-    }
-  }
-
-  Future<void> _deleteAccount(AuthProvider auth) async {
-    if (_isPreparingDeletion || auth.isBusy) return;
-    setState(() => _isPreparingDeletion = true);
-    AccountDeletionPlan plan;
-    try {
-      plan = await AccountDeletionRepository.instance.getPlan();
-    } catch (_) {
-      if (mounted) {
-        setState(() => _isPreparingDeletion = false);
-        _showSnack('Could not load your groups. Please try again.',
-            isError: true);
-      }
-      return;
-    }
-    if (!mounted) return;
-    setState(() => _isPreparingDeletion = false);
-
-    final choice = await showDialog<_AccountDeletionChoice>(
-      context: context,
-      builder: (_) => _AccountDeletionDialog(plan: plan),
-    );
-    if (choice == null || !mounted) return;
-
-    final password = await _promptForPassword();
-    if (password == null || !mounted) return;
-
-    final error = await auth.deleteAccount(
-      currentPassword: password,
-      transfers: choice.transfers,
-      deleteGroupIds: choice.deleteGroupIds,
-    );
-    if (!mounted) return;
-    if (error != null) {
-      _showSnack(error, isError: true);
-    }
-  }
-
   Future<String?> _promptForPassword() async {
     final ctrl = TextEditingController();
     final password = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        title: const Text('Confirm Identity',
-            style:
-                TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Please enter your current password to continue.',
-                style: TextStyle(color: AppColors.slate)),
-            16.verticalSpace,
-            TextField(
-              controller: ctrl,
-              obscureText: true,
-              style: const TextStyle(color: AppColors.ink),
-              decoration: AppTheme.inputDecoration('Current Password'),
-            ),
-          ],
+      builder: (ctx) => AppDialog(
+        icon: Icons.lock_outline_rounded,
+        iconColor: AppColors.ink,
+        title: 'Confirm Identity',
+        message: 'Please enter your current password to continue.',
+        confirmText: 'Confirm',
+        confirmColor: AppColors.ink,
+        onConfirm: () => Navigator.pop(ctx, ctrl.text),
+        content: TextField(
+          controller: ctrl,
+          obscureText: true,
+          autofocus: true,
+          style: const TextStyle(color: AppColors.ink),
+          decoration: AppTheme.inputDecoration('Current Password'),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.slate))),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text),
-            style: AppTheme.solidButton,
-            child: const Text('Confirm'),
-          ),
-        ],
       ),
     );
     ctrl.dispose();
@@ -229,6 +158,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       enabled: !auth.isBusy,
                       initialValue: auth.appUser?.phoneNumber,
                     ),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      value: _discoverableByPhone,
+                      activeTrackColor: AppColors.sage,
+                      title: const Text('Let contacts find me'),
+                      subtitle: const Text(
+                        'People can find your account by matching your phone number.',
+                      ),
+                      onChanged: auth.isBusy
+                          ? null
+                          : (value) => setState(() {
+                                _discoverabilityChanged = true;
+                                _discoverableByPhone = value;
+                              }),
+                    ),
                     20.verticalSpace,
                     SizedBox(
                       width: double.infinity,
@@ -242,7 +186,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ],
                 ),
                 32.verticalSpace,
-                _SectionTitle(title: 'ACCOUNT SECURITY'),
+                _SectionTitle(title: 'EMAIL ADDRESS'),
                 16.verticalSpace,
                 _buildCard(
                   children: [
@@ -267,98 +211,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           padding: EdgeInsets.symmetric(vertical: 12.h),
                         ),
                         child: const Text('Update Email'),
-                      ),
-                    ),
-                    24.verticalSpace,
-                    const Divider(color: AppColors.line),
-                    24.verticalSpace,
-                    TextFormField(
-                      controller: _newPasswordCtrl,
-                      obscureText: _isObscure,
-                      style: const TextStyle(color: AppColors.ink),
-                      decoration: AppTheme.inputDecoration('New Password',
-                              icon: Icons.lock_outline)
-                          .copyWith(
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                              _isObscure
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: AppColors.slate,
-                              size: 18.r),
-                          onPressed: () =>
-                              setState(() => _isObscure = !_isObscure),
-                        ),
-                      ),
-                    ),
-                    12.verticalSpace,
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed:
-                            auth.isBusy ? null : () => _updatePassword(auth),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.ink,
-                          side: const BorderSide(color: AppColors.line),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12.r)),
-                          padding: EdgeInsets.symmetric(vertical: 12.h),
-                        ),
-                        child: const Text('Change Password'),
-                      ),
-                    ),
-                  ],
-                ),
-                32.verticalSpace,
-                const _SectionTitle(title: 'DANGER ZONE'),
-                16.verticalSpace,
-                _buildCard(
-                  children: [
-                    Text(
-                      'Delete account',
-                      style: TextStyle(
-                        color: AppColors.rust,
-                        fontSize: 16.sp,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    8.verticalSpace,
-                    Text(
-                      'Your personal ledger and profile will be deleted. Shared history will be kept and former-member names anonymized. You will choose who takes ownership of each group.',
-                      style: TextStyle(
-                        color: AppColors.slate,
-                        fontSize: 12.sp,
-                        height: 1.4,
-                      ),
-                    ),
-                    16.verticalSpace,
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: auth.isBusy || _isPreparingDeletion
-                            ? null
-                            : () => _deleteAccount(auth),
-                        icon: _isPreparingDeletion
-                            ? SizedBox(
-                                width: 16.r,
-                                height: 16.r,
-                                child: const CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.rust,
-                                ),
-                              )
-                            : const Icon(Icons.delete_forever_outlined),
-                        label: Text(_isPreparingDeletion
-                            ? 'Preparing…'
-                            : 'Delete account'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.rust,
-                          side: const BorderSide(color: AppColors.rust),
-                          padding: EdgeInsets.symmetric(vertical: 12.h),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12.r),
-                          ),
-                        ),
                       ),
                     ),
                   ],
@@ -411,32 +263,45 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _AccountDeletionChoice {
+class AccountDeletionChoice {
   final Map<String, String> transfers;
   final List<String> deleteGroupIds;
+  final bool acknowledgeUnsettled;
 
-  const _AccountDeletionChoice({
+  const AccountDeletionChoice({
     required this.transfers,
     required this.deleteGroupIds,
+    required this.acknowledgeUnsettled,
   });
 }
 
-class _AccountDeletionDialog extends StatefulWidget {
+class AccountDeletionDialog extends StatefulWidget {
   final AccountDeletionPlan plan;
 
-  const _AccountDeletionDialog({required this.plan});
+  const AccountDeletionDialog({super.key, required this.plan});
 
   @override
-  State<_AccountDeletionDialog> createState() => _AccountDeletionDialogState();
+  State<AccountDeletionDialog> createState() => _AccountDeletionDialogState();
 }
 
-class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
+class _AccountDeletionDialogState extends State<AccountDeletionDialog> {
   final Map<String, String> _transfers = {};
   final Set<String> _deleteGroupIds = {};
   bool _confirmed = false;
+  bool _acknowledgeUnsettled = false;
+
+  bool get _hasUnsettledDebt => widget.plan.groupBalances.any(
+        (balance) => balance.balance < -0.005,
+      );
+
+  bool get _hasUnsettledCredit => widget.plan.groupBalances.any(
+        (balance) => balance.balance > 0.005,
+      );
 
   bool get _canContinue =>
       _confirmed &&
+      !_hasUnsettledDebt &&
+      (!_hasUnsettledCredit || _acknowledgeUnsettled) &&
       widget.plan.ownedGroups.every(
         (group) =>
             _deleteGroupIds.contains(group.id) ||
@@ -446,9 +311,10 @@ class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
   void _finish() {
     if (!_canContinue) return;
     Navigator.of(context).pop(
-      _AccountDeletionChoice(
+      AccountDeletionChoice(
         transfers: Map.of(_transfers),
         deleteGroupIds: _deleteGroupIds.toList(),
+        acknowledgeUnsettled: _acknowledgeUnsettled,
       ),
     );
   }
@@ -547,6 +413,21 @@ class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
                     ),
                   ),
                   16.verticalSpace,
+                  if (widget.plan.groupBalances.isNotEmpty) ...[
+                    Text(
+                      'CURRENT GROUP BALANCES',
+                      style: TextStyle(
+                        color: AppColors.slate,
+                        fontSize: 10.sp,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    4.verticalSpace,
+                    for (final balance in widget.plan.groupBalances)
+                      _buildBalanceRow(balance),
+                    12.verticalSpace,
+                  ],
                   if (widget.plan.ownedGroups.isEmpty)
                     _buildEmptyGroups()
                   else ...[
@@ -608,6 +489,32 @@ class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
                       ),
                     ),
                   ),
+                  if (_hasUnsettledCredit)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _acknowledgeUnsettled,
+                      activeColor: AppColors.rust,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text('Acknowledge balances owed to me'),
+                      subtitle: const Text(
+                        'Account deletion will not settle these receivables.',
+                      ),
+                      onChanged: (value) => setState(
+                        () => _acknowledgeUnsettled = value ?? false,
+                      ),
+                    ),
+                  if (_hasUnsettledDebt)
+                    Padding(
+                      padding: EdgeInsets.only(top: 6.h),
+                      child: Text(
+                        'Settle balances you owe before continuing with account deletion.',
+                        style: TextStyle(
+                          color: AppColors.rust,
+                          fontSize: 11.sp,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
                   8.verticalSpace,
                   Row(
                     children: [
@@ -700,6 +607,17 @@ class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
                 ),
               ),
             ],
+          ),
+          Padding(
+            padding: EdgeInsets.only(top: 10.h),
+            child: Text(
+              _balanceLabel(group.balance, group.currency),
+              style: TextStyle(
+                color: _balanceColor(group.balance),
+                fontSize: 11.sp,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ),
           if (group.candidates.isNotEmpty) ...[
             12.verticalSpace,
@@ -903,6 +821,46 @@ class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
       ),
     );
   }
+
+  Widget _buildBalanceRow(AccountDeletionBalance balance) {
+    final deleting = widget.plan.ownedGroups.any((group) =>
+        group.id == balance.id && _deleteGroupIds.contains(group.id));
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 5.h),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              balance.name + (deleting ? ' · will be deleted' : ''),
+              style: TextStyle(color: AppColors.ink, fontSize: 11.sp),
+            ),
+          ),
+          Text(
+            _balanceLabel(balance.balance, balance.currency),
+            style: TextStyle(
+              color: _balanceColor(balance.balance),
+              fontSize: 11.sp,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _balanceLabel(double balance, String currency) {
+    if (balance > 0.005) return 'Owed ${balance.toStringAsFixed(2)} $currency';
+    if (balance < -0.005) {
+      return 'You owe ${(-balance).toStringAsFixed(2)} $currency';
+    }
+    return 'Settled';
+  }
+
+  Color _balanceColor(double balance) => balance < -0.005
+      ? AppColors.rust
+      : balance > 0.005
+          ? AppColors.ink
+          : AppColors.slate;
 
   void _setDeleteChoice(String groupId, bool deleting) {
     setState(() {

@@ -10,6 +10,7 @@ import '../widgets/branded_loader.dart';
 import '../widgets/ledger_tab.dart';
 import '../widgets/group_chat_tab.dart';
 import '../widgets/expense_form_sheet.dart';
+import '../widgets/app_dialog.dart';
 import 'ai_expense_screen.dart';
 import 'group_members_screen.dart';
 
@@ -59,25 +60,29 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (context, setDialogState) {
-        return AlertDialog(
-          backgroundColor: AppColors.paper,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-          title: const Text('New Group',
-              style:
-                  TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+        return AppDialog(
+          icon: Icons.group_add_outlined,
+          iconColor: AppColors.brass,
+          title: 'New Group',
+          confirmText: 'Create',
+          confirmColor: AppColors.brass,
+          onConfirm: () {
+            if (ctrl.text.trim().isNotEmpty) {
+              provider.addGroup(ctrl.text,
+                  ownerName: ownerName, currency: selectedCurrency);
+              Navigator.pop(ctx);
+            }
+          },
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: ctrl,
                 autofocus: true,
-                style: TextStyle(color: AppColors.ink, fontSize: 16.sp),
+                style: TextStyle(color: AppColors.ink, fontSize: 15.sp),
                 decoration:
                     AppTheme.inputDecoration('Group Name (e.g. Vacation)')
-                        .copyWith(
-                  filled: false,
-                ),
+                        .copyWith(filled: false),
               ),
               16.verticalSpace,
               DropdownButtonFormField<String>(
@@ -85,7 +90,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                 dropdownColor: AppColors.paper,
                 style: TextStyle(
                     color: AppColors.ink,
-                    fontSize: 16.sp,
+                    fontSize: 15.sp,
                     fontWeight: FontWeight.bold),
                 decoration: AppTheme.inputDecoration('Currency').copyWith(
                   prefixIcon: Icon(Icons.payments_outlined,
@@ -115,27 +120,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.slate)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (ctrl.text.trim().isNotEmpty) {
-                  provider.addGroup(ctrl.text,
-                      ownerName: ownerName, currency: selectedCurrency);
-                  Navigator.pop(ctx);
-                }
-              },
-              style: AppTheme.solidButton.copyWith(
-                padding: WidgetStateProperty.all(
-                    EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h)),
-              ),
-              child: const Text('Create'),
-            ),
-          ],
         );
       }),
     );

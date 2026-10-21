@@ -7,12 +7,14 @@ class AppUser {
   final String name;
   final String email;
   final String? phoneNumber;
+  final bool? discoverableByPhone;
 
   AppUser({
     required this.uid,
     required this.name,
     required this.email,
     this.phoneNumber,
+    this.discoverableByPhone,
   });
 
   Map<String, dynamic> toJson() => {
@@ -20,6 +22,7 @@ class AppUser {
         'name': name,
         'email': email,
         'phoneNumber': phoneNumber,
+        'discoverableByPhone': discoverableByPhone,
       };
 
   factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
@@ -27,5 +30,6 @@ class AppUser {
         name: json['name'] as String? ?? '',
         email: json['email'] as String? ?? '',
         phoneNumber: json['phoneNumber'] as String?,
+        discoverableByPhone: json['discoverableByPhone'] as bool?,
       );
 }

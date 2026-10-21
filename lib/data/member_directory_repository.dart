@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/app_user.dart';
+import '../utils/phone_lookup.dart';
 
-/// Reads the signed-in user's private profile. User documents are no longer
-/// a public directory; contact matching must use a trusted lookup once phone
-/// verification is implemented.
+/// Reads and updates profiles. User documents stay private; phone matching
+/// goes through the trusted, rate-limited callable.
 class MemberDirectoryRepository {
   MemberDirectoryRepository._();
   static final MemberDirectoryRepository instance =
@@ -51,7 +51,24 @@ class MemberDirectoryRepository {
     try {
       final doc = await _users.doc(uid).get();
       if (!doc.exists) return null;
-      return AppUser.fromJson({'uid': doc.id, ...?doc.data()});
+      final data = doc.data()!;
+      final phoneNumber = data['phoneNumber'];
+      final phoneKey =
+          phoneNumber is String ? normalizeLookupPhone(phoneNumber) : '';
+      final indexedPhoneKey =
+          phoneKey.length >= 7 && phoneKey.length <= 15 ? phoneKey : null;
+      if (data['phoneKey'] != indexedPhoneKey) {
+        try {
+          await doc.reference.update({
+            'phoneKey': indexedPhoneKey ?? FieldValue.delete(),
+          });
+        } catch (e) {
+          // Profile reads should still succeed if an account is being deleted
+          // or a legacy profile cannot be backfilled.
+          debugPrint('Could not backfill phone lookup key: $e');
+        }
+      }
+      return AppUser.fromJson({'uid': doc.id, ...data});
     } catch (e, st) {
       debugPrint('MemberDirectoryRepository.fetchByUid failed: $e\n$st');
       return null;
@@ -71,6 +88,17 @@ class MemberDirectoryRepository {
       if (user.name.trim().isNotEmpty) data['name'] = user.name;
       if (user.email.trim().isNotEmpty) data['email'] = user.email;
       if (user.phoneNumber != null) data['phoneNumber'] = user.phoneNumber;
+      if (user.phoneNumber != null) {
+        final phoneKey = normalizeLookupPhone(user.phoneNumber!);
+        if (phoneKey.length >= 7 && phoneKey.length <= 15) {
+          data['phoneKey'] = phoneKey;
+        } else {
+          data['phoneKey'] = FieldValue.delete();
+        }
+      }
+      if (user.discoverableByPhone != null) {
+        data['discoverableByPhone'] = user.discoverableByPhone;
+      }
       await _users.doc(user.uid).set(data, SetOptions(merge: true));
     } catch (e, st) {
       debugPrint('MemberDirectoryRepository.upsertProfile failed: $e\n$st');

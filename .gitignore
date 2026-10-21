@@ -73,3 +73,9 @@ ui-debug.log
 # Tooling output / local notes that should not be versioned
 .artifacts/
 *.artifact.md
+firepit-log.txt
+
+# Secrets & Service Accounts
+*-adminsdk-*.json
+*-service-account*.json
+*.pem

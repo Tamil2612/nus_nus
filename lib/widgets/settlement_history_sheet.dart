@@ -5,8 +5,8 @@ import '../data/firestore_repository.dart';
 import '../models/settlement_record.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
+import 'app_dialog.dart';
 
 /// Bottom sheet listing the current group's recorded settlements, with an
 /// Undo action for the two people involved in each one.
@@ -46,36 +46,17 @@ class SettlementHistorySheet extends StatelessWidget {
     SettlementRecord record,
     String description,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: const Text('Undo this settlement?',
-            style:
-                TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: Text(
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: Icons.undo_rounded,
+      iconColor: AppColors.rust,
+      title: 'Undo this settlement?',
+      message:
           '$description\n\nThe shares it covered become unpaid again and '
           'balances go back to what they were before. If it was recorded in '
           'several groups, all of them are undone together.',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child:
-                const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Undo'),
-          ),
-        ],
-      ),
+      confirmText: 'Undo settlement',
+      confirmColor: AppColors.rust,
     );
     if (confirmed != true) return;
 

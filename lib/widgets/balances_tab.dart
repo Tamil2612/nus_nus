@@ -4,9 +4,9 @@ import 'package:provider/provider.dart';
 import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import 'common_atoms.dart';
+import 'app_dialog.dart';
 import 'app_loading_overlay.dart';
 import 'settlement_history_sheet.dart';
 
@@ -23,33 +23,17 @@ class BalancesTab extends StatelessWidget {
     final from = provider.personById(fromId);
     final to = provider.personById(toId);
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-        title: const Text('Record settlement?',
-            style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: Text(
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: Icons.check_circle_outline_rounded,
+      iconColor: AppColors.sage,
+      title: 'Record settlement?',
+      message:
           'Record that ${from?.name ?? '?'} paid ${to?.name ?? '?'} '
           '${fmtCurrency(amount, provider.currentGroup?.currency ?? 'AED')}? '
           'This updates your ledger (no money moves inside the app).',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.slate)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.sage),
-            ),
-            child: const Text('Mark as settled'),
-          ),
-        ],
-      ),
+      confirmText: 'Mark as settled',
+      confirmColor: AppColors.sage,
     );
 
     if (confirmed != true || !context.mounted) return;

@@ -6,9 +6,11 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
+import '../utils/phone_lookup.dart';
 
-/// Opens a privacy-conscious contact picker. Contact data stays on-device;
-/// no address-book upload is performed. Typed phone numbers are looked up against stored profiles.
+/// Matches phone numbers from device contacts using the trusted lookup callable.
+/// Contact names stay on-device, and submitted phone numbers are processed
+/// transiently rather than stored remotely.
 void showAddMemberSheet(BuildContext context) {
   showModalBottomSheet<void>(
     context: context,
@@ -64,30 +66,9 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
 
   String _digitsOnly(String value) => value.replaceAll(RegExp('[^0-9]'), '');
 
-  // Keep this in sync with functions/phone_lookup.js. Contact matching keys
-  // are canonical only in memory; raw contact data is not stored remotely.
-  String _phoneKey(String value) {
-    var digits = _digitsOnly(value);
-    if (digits.startsWith('00')) digits = digits.substring(2);
-    if (digits.startsWith('971')) {
-      final national = digits.substring(3);
-      return national.startsWith('0') ? national : '0$national';
-    }
-    // Indian mobile numbers compare as the same 10-digit national number.
-    if (digits.startsWith('91') &&
-        digits.length == 12 &&
-        RegExp(r'^[6-9]\d{9}$').hasMatch(digits.substring(2))) {
-      return digits.substring(2);
-    }
-    if (digits.length == 11 &&
-        digits.startsWith('0') &&
-        RegExp(r'^[6-9]\d{9}$').hasMatch(digits.substring(1))) {
-      return digits.substring(1);
-    }
-    if (RegExp(r'^[6-9]\d{9}$').hasMatch(digits)) return digits;
-    if (digits.length == 9 && digits.startsWith('5')) return '0$digits';
-    return digits;
-  }
+  // Keep this in sync with functions/phone_lookup.js. Canonical matching keys
+  // stay in memory; phone numbers sent for matching are not stored remotely.
+  String _phoneKey(String value) => normalizeLookupPhone(value);
 
   Future<void> _matchLoadedContacts(List<Contact> contacts) async {
     final phoneNumbers = <String>{};
@@ -111,8 +92,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       return;
     }
 
-    // Send a bounded batch. The backend compares canonical phone values
-    // against private users/{uid}.phoneNumber fields and returns only matches.
+    // Send at most five 100-number batches, within the callable minute limit.
     final batch = phoneNumbers.take(500).toList();
     if (mounted) {
       setState(() {
@@ -123,28 +103,33 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     try {
       final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
           .httpsCallable('lookupRegisteredUsersByPhones');
-      final response = await callable.call(<String, dynamic>{
-        'phoneNumbers': batch,
-      });
+      final mergedMatches = <String, dynamic>{};
+      final mergedAmbiguous = <String>{};
+      for (var start = 0; start < batch.length; start += 100) {
+        final response = await callable.call(<String, dynamic>{
+          'phoneNumbers': batch.skip(start).take(100).toList(),
+        });
+        final data = Map<String, dynamic>.from(response.data as Map);
+        final rawMatches = data['matches'];
+        if (rawMatches is Map) {
+          mergedMatches.addAll(rawMatches.cast<String, dynamic>());
+        }
+        final rawAmbiguous = data['ambiguous'];
+        if (rawAmbiguous is List) {
+          mergedAmbiguous.addAll(rawAmbiguous.map((item) => item.toString()));
+        }
+      }
       if (!mounted) return;
-      final data = Map<String, dynamic>.from(response.data as Map);
-      final rawMatches = data['matches'];
-      final rawAmbiguous = data['ambiguous'];
       setState(() {
         _registeredContacts.clear();
         _ambiguousContactPhones.clear();
-        if (rawMatches is Map) {
-          for (final entry in rawMatches.entries) {
-            if (entry.value is Map) {
-              _registeredContacts[entry.key.toString()] =
-                  Map<String, dynamic>.from(entry.value as Map);
-            }
+        for (final entry in mergedMatches.entries) {
+          if (entry.value is Map) {
+            _registeredContacts[entry.key] =
+                Map<String, dynamic>.from(entry.value as Map);
           }
         }
-        if (rawAmbiguous is List) {
-          _ambiguousContactPhones
-              .addAll(rawAmbiguous.map((item) => item.toString()));
-        }
+        _ambiguousContactPhones.addAll(mergedAmbiguous);
         _matchingContacts = false;
         _contactMatchError = null;
       });
@@ -152,9 +137,11 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       if (!mounted) return;
       setState(() {
         _matchingContacts = false;
-        _contactMatchError = error.code == 'not-found'
-            ? 'Contact matching is not deployed yet. Deploy the latest Cloud Functions and retry.'
-            : 'Could not match contacts. Check your connection and retry.';
+        _contactMatchError = error.code == 'resource-exhausted'
+            ? 'Phone search limit reached. Try again later.'
+            : error.code == 'not-found'
+                ? 'Contact matching is not deployed yet. Deploy the latest Cloud Functions and retry.'
+                : 'Could not match contacts. Check your connection and retry.';
       });
     } catch (_) {
       if (mounted) {
@@ -201,17 +188,21 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
     });
     try {
       final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-          .httpsCallable('lookupRegisteredUserByPhone');
-      final response =
-          await callable.call(<String, dynamic>{'phoneNumber': phoneNumber});
+          .httpsCallable('lookupRegisteredUsersByPhones');
+      final response = await callable.call(<String, dynamic>{
+        'phoneNumbers': <String>[phoneNumber],
+      });
       if (!mounted || sequence != _lookupSequence) return;
       final data = Map<String, dynamic>.from(response.data as Map);
       setState(() {
         _lookupLoading = false;
         _lookupAttempted = true;
-        _ambiguousMatch = data['ambiguous'] == true;
-        _registeredUser = data['found'] == true && data['user'] is Map
-            ? Map<String, dynamic>.from(data['user'] as Map)
+        final key = normalizeLookupPhone(phoneNumber);
+        final matches = data['matches'];
+        _ambiguousMatch = data['ambiguous'] is List &&
+            (data['ambiguous'] as List).contains(key);
+        _registeredUser = matches is Map && matches[key] is Map
+            ? Map<String, dynamic>.from(matches[key] as Map)
             : null;
       });
     } on FirebaseFunctionsException catch (error) {
@@ -219,7 +210,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       setState(() {
         _lookupLoading = false;
         _lookupError = error.code == 'resource-exhausted'
-            ? 'Too many searches. Wait a minute and try again.'
+            ? 'Search limit reached. Try again in a minute or tomorrow.'
             : 'Could not search registered users. Please try again.';
       });
     } catch (_) {
@@ -700,7 +691,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                                   fontSize: 15.sp)),
                           8.verticalSpace,
                           Text(
-                            'Allow contact access to choose someone. Your address book is not uploaded.',
+                            'If you allow contact matching, phone numbers are sent securely to check for registered users and are not stored.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                                 color: AppColors.slate, fontSize: 12.sp),
@@ -734,7 +725,7 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                                   fontWeight: FontWeight.bold)),
                           8.verticalSpace,
                           Text(
-                            'Only the contact you choose is used. Nus·Nus will not upload your address book.',
+                            'Contact phone numbers are sent securely to check which people use Nus·Nus. The numbers are not stored.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                                 color: AppColors.slate, fontSize: 12.sp),

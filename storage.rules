@@ -2,11 +2,14 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
+    // Storage rules allow only two Firestore lookups per request, so this uses
+    // a single get() on the user document (the group lookup is the second).
+    // Every signed-in user has a profile document; if it were missing the get
+    // fails and the write is denied, which is the safe outcome.
     function accountCanWrite() {
       return signedIn() &&
-        (!firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) ||
-          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data
-            .get('accountDeletionInProgress', false) != true);
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data
+          .get('accountDeletionInProgress', false) != true;
     }
     function groupData(groupId) {
       return firestore.get(/databases/(default)/documents/groups/$(groupId)).data;

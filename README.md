@@ -233,6 +233,7 @@ Deploying rules is required for the latest chat access and one-time edit restric
 
 ## Data and security notes
 
+- The public privacy policy is available at [`web/privacy-policy.html`](web/privacy-policy.html) and is included in Flutter web builds for Firebase Hosting.
 - Group messages are stored under `groups/{groupId}/messages`.
 - Expenses remain authoritative under `groups/{groupId}/expenses`; the chat timeline does not duplicate expense records.
 - New chat images are stored in Firebase Storage under group-scoped paths.

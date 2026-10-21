@@ -9,6 +9,8 @@ import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../screens/group_detail_screen.dart';
 import '../screens/edit_profile_screen.dart';
+import '../screens/privacy_policy_screen.dart';
+import '../screens/security_screen.dart';
 import '../services/notification_service.dart';
 
 class NusDrawer extends StatelessWidget {
@@ -97,6 +99,10 @@ class NusDrawer extends StatelessWidget {
               padding: EdgeInsets.symmetric(vertical: 20.h),
               children: [
                 if (!showGroups) ...[
+                  if (notificationUid != null) ...[
+                    _NotificationOptInTile(uid: notificationUid),
+                    12.verticalSpace,
+                  ],
                   _DrawerActionTile(
                     icon: Icons.person_outline,
                     label: 'EDIT PROFILE',
@@ -110,12 +116,31 @@ class NusDrawer extends StatelessWidget {
                       );
                     },
                   ),
-                  if (notificationUid != null)
-                    _NotificationOptInTile(uid: notificationUid),
                   _DrawerActionTile(
                     icon: Icons.security_outlined,
                     label: 'SECURITY',
-                    onTap: () => Navigator.pop(context),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SecurityScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _DrawerActionTile(
+                    icon: Icons.privacy_tip_outlined,
+                    label: 'PRIVACY POLICY',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PrivacyPolicyScreen(),
+                        ),
+                      );
+                    },
                   ),
                 ],
                 if (showGroups && provider.allOwnedGroups.isNotEmpty) ...[

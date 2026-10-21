@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../models/group.dart';
@@ -6,7 +7,9 @@ import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../utils/settlement_calculator.dart';
 import '../widgets/add_member_sheet.dart';
+import '../widgets/app_dialog.dart';
 
 /// Searchable roster opened by tapping a group's name in the app bar.
 class GroupMembersScreen extends StatefulWidget {
@@ -35,39 +38,16 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
           expense.payerId == person.id ||
           expense.splitMap.containsKey(person.id),
     );
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-        title: Text(
-          'Remove ${person.name}?',
-          style: const TextStyle(
-            color: AppColors.ink,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Text(
-          hasHistory
-              ? '${person.name} has expense history. They will be removed from the active member list, while past expenses and balances stay intact.'
-              : '${person.name} has no expense history and will be removed from the group.',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Remove member'),
-          ),
-        ],
-      ),
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: Icons.person_remove_outlined,
+      iconColor: AppColors.rust,
+      title: 'Remove ${person.name}?',
+      message: hasHistory
+          ? '${person.name} has expense history. They will be removed from the active member list, while past expenses and balances stay intact.'
+          : '${person.name} has no expense history and will be removed from the group.',
+      confirmText: 'Remove member',
+      confirmColor: AppColors.rust,
     );
     if (confirmed != true || !mounted) return;
 
@@ -87,6 +67,8 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     final isOwner = group.ownerId == provider.uid;
     String? transferToUid;
     var shouldDeleteGroup = false;
+    var acknowledgeUnsettled = false;
+    final balance = _myGroupBalance(provider, group);
 
     if (isOwner) {
       final candidates = group.members
@@ -96,63 +78,98 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
               member.linkedUserId != provider.uid &&
               group.memberUids.contains(member.linkedUserId))
           .toList();
-      final decision = await _ownerLeaveDialog(group, candidates);
+      final decision = await _ownerLeaveDialog(group, candidates, balance);
       if (decision == null || !mounted) return;
       transferToUid = decision.transferToUid;
       shouldDeleteGroup = decision.deleteGroup;
+      acknowledgeUnsettled = decision.acknowledgeUnsettled;
 
       if (shouldDeleteGroup) {
         await _deleteGroup(group);
         return;
       }
     } else {
-      final confirmed = await showDialog<bool>(
+      if (balance < -0.005) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AppDialog(
+            icon: Icons.account_balance_wallet_outlined,
+            iconColor: AppColors.brass,
+            title: 'Settle your balance first',
+            message:
+                'You owe ${(-balance).toStringAsFixed(2)} ${group.currency}. Settle this balance before leaving the group.',
+            showCancel: false,
+            confirmText: 'Close',
+            confirmColor: AppColors.ink,
+            onConfirm: () => Navigator.pop(dialogContext),
+          ),
+        );
+        return;
+      }
+      final decision = await showDialog<_LeaveGroupDecision>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          backgroundColor: AppColors.paper,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-          title: Text(
-            'Leave “${group.name}”?',
-            style: const TextStyle(
-                color: AppColors.ink, fontWeight: FontWeight.w800),
-          ),
-          content: const Text(
-            'You will lose access to this group. Shared expenses and balances will remain, and your old member and chat names will show as “Former member”.',
-            style: TextStyle(color: AppColors.slate, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AppDialog(
+            icon: Icons.exit_to_app_rounded,
+            iconColor: AppColors.rust,
+            title: 'Leave “${group.name}”?',
+            confirmText: 'Leave group',
+            confirmColor: AppColors.rust,
+            isConfirmDisabled: balance > 0.005 && !acknowledgeUnsettled,
+            onConfirm: () => Navigator.pop(
+              dialogContext,
+              _LeaveGroupDecision(
+                  acknowledgeUnsettled: acknowledgeUnsettled),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.rust,
-                foregroundColor: AppColors.paper,
-              ),
-              child: const Text('Leave group'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current balance: ${_balanceLabel(balance, group.currency)}. Your old member and chat names will show as “Former member”.',
+                  style: const TextStyle(color: AppColors.slate, height: 1.4),
+                ),
+                if (balance > 0.005)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: acknowledgeUnsettled,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('I acknowledge this unpaid balance'),
+                    subtitle: const Text(
+                      'The amount owed to you will remain in group history.',
+                    ),
+                    onChanged: (value) => setDialogState(
+                      () => acknowledgeUnsettled = value ?? false,
+                    ),
+                  ),
+              ],
             ),
-          ],
+          ),
         ),
       );
-      if (confirmed != true || !mounted) return;
+      if (decision == null || !mounted) return;
+      acknowledgeUnsettled = decision.acknowledgeUnsettled;
     }
 
     try {
-      await provider.leaveCurrentGroup(transferToUid: transferToUid);
+      await provider.leaveCurrentGroup(
+        transferToUid: transferToUid,
+        acknowledgeUnsettled: acknowledgeUnsettled,
+      );
       if (mounted) {
         // Leaving a shared group should return to the shared-groups view,
         // rather than dropping the user into their personal spend tab.
         provider.requestLandingTab(1);
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Could not leave the group. Please try again.'),
+          content: Text(
+              error is FirebaseFunctionsException && error.message != null
+                  ? error.message!
+                  : 'Could not leave the group. Please try again.'),
           backgroundColor: AppColors.rust,
           behavior: SnackBarBehavior.floating,
         ),
@@ -163,9 +180,11 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
   Future<_OwnerLeaveDecision?> _ownerLeaveDialog(
     Group group,
     List<Person> candidates,
+    double balance,
   ) async {
     String? selectedUid;
     var deleteGroup = false;
+    var acknowledgeUnsettled = false;
     return showDialog<_OwnerLeaveDecision>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -189,6 +208,40 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                       : 'Transfer ownership to an active member before leaving. Your access will be removed, while shared expenses and balances stay with the group.',
                   style: const TextStyle(color: AppColors.slate, height: 1.4),
                 ),
+                10.verticalSpace,
+                Text(
+                  'Current balance: ${_balanceLabel(balance, group.currency)}.',
+                  style: TextStyle(
+                    color: balance < -0.005 ? AppColors.rust : AppColors.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (balance < -0.005 && candidates.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: 6.h),
+                    child: Text(
+                      'Settle this amount before transferring ownership and leaving. You can delete the group instead.',
+                      style: TextStyle(
+                        color: AppColors.rust,
+                        fontSize: 11.sp,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                if (balance > 0.005 && candidates.isNotEmpty)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: acknowledgeUnsettled,
+                    activeColor: AppColors.ink,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Acknowledge this unpaid balance'),
+                    subtitle: const Text(
+                      'The amount owed to you will remain in group history.',
+                    ),
+                    onChanged: (value) => setDialogState(
+                      () => acknowledgeUnsettled = value ?? false,
+                    ),
+                  ),
                 if (candidates.isNotEmpty) ...[
                   16.verticalSpace,
                   DropdownButtonFormField<String>(
@@ -250,12 +303,16 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: deleteGroup || selectedUid != null
+              onPressed: deleteGroup ||
+                      (selectedUid != null &&
+                          balance >= -0.005 &&
+                          (balance <= 0.005 || acknowledgeUnsettled))
                   ? () => Navigator.pop(
                         dialogContext,
                         _OwnerLeaveDecision(
                           transferToUid: selectedUid,
                           deleteGroup: deleteGroup,
+                          acknowledgeUnsettled: acknowledgeUnsettled,
                         ),
                       )
                   : null,
@@ -272,6 +329,40 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
         ),
       ),
     );
+  }
+
+  double _myGroupBalance(SplitProvider provider, Group group) {
+    final uid = provider.uid;
+    if (uid == null) return 0;
+    Person? me;
+    for (final member in group.members) {
+      if (member.linkedUserId == uid) {
+        me = member;
+        break;
+      }
+    }
+    if (me == null && group.ownerId == uid) {
+      for (final member in group.members) {
+        if (member.id == 1) {
+          me = member;
+          break;
+        }
+      }
+    }
+    if (me == null) return 0;
+    final balances = SettlementCalculator.computeBalances(
+      personIds: group.members.map((member) => member.id).toList(),
+      expenses: provider.expenses,
+    );
+    return balances[me.id] ?? 0;
+  }
+
+  String _balanceLabel(double balance, String currency) {
+    if (balance > 0.005) return 'owed ${balance.toStringAsFixed(2)} $currency';
+    if (balance < -0.005) {
+      return 'you owe ${(-balance).toStringAsFixed(2)} $currency';
+    }
+    return 'settled';
   }
 
   Future<void> _editGroup(Group group) async {
@@ -295,13 +386,22 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          backgroundColor: AppColors.paper,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-          title: const Text('Edit group',
-              style:
-                  TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
+        builder: (dialogContext, setDialogState) => AppDialog(
+          icon: Icons.edit_outlined,
+          iconColor: AppColors.brass,
+          title: 'Edit group',
+          confirmText: 'Save changes',
+          confirmColor: AppColors.brass,
+          onConfirm: () {
+            final name = editedName.trim();
+            if (name.isEmpty) return;
+            context.read<SplitProvider>().renameGroup(
+                  group.id,
+                  name,
+                  newCurrency: selectedCurrency,
+                );
+            Navigator.pop(dialogContext);
+          },
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -339,59 +439,21 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final name = editedName.trim();
-                if (name.isEmpty) return;
-                context.read<SplitProvider>().renameGroup(
-                      group.id,
-                      name,
-                      newCurrency: selectedCurrency,
-                    );
-                Navigator.pop(dialogContext);
-              },
-              style: AppTheme.solidButton,
-              child: const Text('Save changes'),
-            ),
-          ],
         ),
       ),
     );
   }
 
   Future<void> _deleteGroup(Group group) async {
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-        title: Text('Delete “${group.name}”?',
-            style: const TextStyle(
-                color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: const Text(
+    final shouldDelete = await AppDialog.showConfirm(
+      context,
+      icon: Icons.delete_forever_outlined,
+      iconColor: AppColors.rust,
+      title: 'Delete “${group.name}”?',
+      message:
           'This permanently deletes the group, chat, members, and expense history. This cannot be undone.',
-          style: TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Delete group'),
-          ),
-        ],
-      ),
+      confirmText: 'Delete group',
+      confirmColor: AppColors.rust,
     );
     if (shouldDelete != true || !mounted) return;
 
@@ -870,9 +932,17 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
 class _OwnerLeaveDecision {
   final String? transferToUid;
   final bool deleteGroup;
+  final bool acknowledgeUnsettled;
 
   const _OwnerLeaveDecision({
     required this.transferToUid,
     required this.deleteGroup,
+    required this.acknowledgeUnsettled,
   });
+}
+
+class _LeaveGroupDecision {
+  final bool acknowledgeUnsettled;
+
+  const _LeaveGroupDecision({required this.acknowledgeUnsettled});
 }

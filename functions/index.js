@@ -7,6 +7,7 @@ const {
   subtractAllocations,
   canRevert,
   settlementAllocationTargets,
+  netBalanceForPerson,
 } = require('./settlement_log');
 
 // Initialize Firebase Admin
@@ -20,6 +21,12 @@ const genAI = new GoogleGenerativeAI(apiKey);
 const db = admin.firestore();
 const { normalizeLookupPhone } = require('./phone_lookup');
 
+// App Check enforcement for every callable. Off by default so existing builds
+// keep working; once the apps send App Check tokens (see lib/main.dart) set
+// ENFORCE_APP_CHECK=true in functions/.env and redeploy.
+const enforceAppCheck = process.env.ENFORCE_APP_CHECK === 'true';
+const callable = functions.runWith({ enforceAppCheck });
+
 async function assertAccountActive(uid) {
   const userSnap = await db.collection('users').doc(uid).get();
   if (userSnap.exists && userSnap.data().accountDeletionInProgress === true) {
@@ -31,7 +38,7 @@ async function assertAccountActive(uid) {
 }
 
 // Gemini AI Service Function
-exports.parseBillWithAI = functions.https.onCall(async (data, context) => {
+exports.parseBillWithAI = callable.https.onCall(async (data, context) => {
   // Check authentication
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -165,7 +172,7 @@ JSON Schema:
 });
 
 // Query App State with AI Function
-exports.queryAppState = functions.https.onCall(async (data, context) => {
+exports.queryAppState = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       'unauthenticated',
@@ -300,7 +307,7 @@ exports.onGroupMessageCreated = functions.firestore
 
 // Owner-only group deletion callable. The client cannot delete expenses added
 // by other members, so recursive deletion must run with Admin privileges.
-exports.deleteGroup = functions.https.onCall(async (data, context) => {
+exports.deleteGroup = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to delete this group.');
   }
@@ -328,7 +335,7 @@ exports.deleteGroup = functions.https.onCall(async (data, context) => {
 
 // Allows a group member to leave while preserving ledger history. Owners must
 // atomically transfer ownership to an active registered member before leaving.
-exports.leaveGroup = functions.https.onCall(async (data, context) => {
+exports.leaveGroup = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to leave this group.');
   }
@@ -366,6 +373,25 @@ exports.leaveGroup = functions.https.onCall(async (data, context) => {
       }
       if (!isOwner && transferToUid) {
         throw new functions.https.HttpsError('invalid-argument', 'Only the owner can transfer ownership.');
+      }
+
+      const person = members.find((member) => member && member.linkedUserId === uid) ||
+        (isOwner ? members.find((member) => member && Number(member.id) === 1) : null);
+      const expensesSnap = await tx.get(groupRef.collection('expenses'));
+      const balance = person
+        ? netBalanceForPerson(expensesSnap.docs.map((doc) => doc.data()), person.id)
+        : 0;
+      if (balance < -0.005) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Settle the ${Math.abs(balance).toFixed(2)} ${group.currency || 'AED'} you owe before leaving this group.`,
+        );
+      }
+      if (balance > 0.005 && (!data || data.acknowledgeUnsettled !== true)) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Acknowledge the unsettled balance owed to you before leaving this group.',
+        );
       }
 
       let nextOwner = null;
@@ -428,17 +454,40 @@ async function getGroupsForAccount(uid) {
   return [...byId.values()];
 }
 
+async function getGroupNetBalance(groupDoc, uid) {
+  const group = groupDoc.data();
+  const members = Array.isArray(group.members) ? group.members : [];
+  const person = members.find((member) => member && member.linkedUserId === uid) ||
+    (group.ownerId === uid
+      ? members.find((member) => member && Number(member.id) === 1)
+      : null);
+  if (!person) return 0;
+  const expenses = await groupDoc.ref.collection('expenses').get();
+  return netBalanceForPerson(expenses.docs.map((doc) => doc.data()), person.id);
+}
+
 // Returns the owner handoff choices before the UI asks the user to confirm
 // account deletion. Only active, registered group members are valid owners.
-exports.getAccountDeletionPlan = functions.https.onCall(async (_data, context) => {
+exports.getAccountDeletionPlan = callable.https.onCall(async (_data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to review account deletion.');
   }
   try {
     const uid = context.auth.uid;
     const groups = await getGroupsForAccount(uid);
-    const ownedGroups = groups
-      .filter((doc) => doc.data().ownerId === uid && doc.data().isPersonal !== true)
+    const sharedGroups = groups.filter((doc) => doc.data().isPersonal !== true);
+    const groupBalances = await Promise.all(sharedGroups.map(async (doc) => {
+      const group = doc.data();
+      return {
+        groupId: doc.id,
+        name: String(group.name || 'Untitled group').slice(0, 100),
+        currency: String(group.currency || 'AED').toUpperCase(),
+        balance: await getGroupNetBalance(doc, uid),
+      };
+    }));
+    const balanceById = new Map(groupBalances.map((item) => [item.groupId, item]));
+    const ownedGroups = sharedGroups
+      .filter((doc) => doc.data().ownerId === uid)
       .map((doc) => {
         const group = doc.data();
         const memberUids = Array.isArray(group.memberUids) ? group.memberUids : [];
@@ -456,9 +505,11 @@ exports.getAccountDeletionPlan = functions.https.onCall(async (_data, context) =
           groupId: doc.id,
           name: String(group.name || 'Untitled group').slice(0, 100),
           candidates,
+          balance: balanceById.get(doc.id)?.balance || 0,
+          currency: balanceById.get(doc.id)?.currency || String(group.currency || 'AED').toUpperCase(),
         };
       });
-    return { ownedGroups };
+    return { ownedGroups, groupBalances };
   } catch (error) {
     console.error('getAccountDeletionPlan failed:', error);
     throw new functions.https.HttpsError('internal', 'Could not load the account deletion plan. Please try again.');
@@ -480,7 +531,7 @@ async function deleteGroupData(groupId) {
 
 // Account deletion is deliberately server-owned: the client cannot transfer
 // group ownership, unlink members, or recursively remove another user's data.
-exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1GB' })
+exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1GB', enforceAppCheck })
   .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'Sign in again before deleting your account.');
@@ -495,6 +546,10 @@ exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1G
       !Array.isArray(data.transfers) ? data.transfers : {};
     const deleteGroupIds = Array.isArray(data && data.deleteGroupIds)
       ? data.deleteGroupIds : [];
+    if (data && data.acknowledgeUnsettled != null &&
+        typeof data.acknowledgeUnsettled !== 'boolean') {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid unsettled-balance acknowledgement.');
+    }
     if (deleteGroupIds.length > 100 ||
         deleteGroupIds.some((id) => typeof id !== 'string' || !id || id.length > 200 || id.includes('/')) ||
         Object.keys(transfers).length > 100 ||
@@ -551,6 +606,29 @@ exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1G
         const group = groupSnap.data();
         if (group.ownerId !== uid || group.isPersonal === true) {
           throw new functions.https.HttpsError('permission-denied', 'Only a shared group you own can be deleted here.');
+        }
+      }
+
+      // Check all shared group balances before any deletion or ownership
+      // transfer starts. Debtors must settle first; creditors must explicitly
+      // acknowledge unsettled receivables before account deletion.
+      const accountGroups = await getGroupsForAccount(uid);
+      for (const groupDoc of accountGroups) {
+        const group = groupDoc.data();
+        if (group.isPersonal === true) continue;
+        const balance = await getGroupNetBalance(groupDoc, uid);
+        if (balance < -0.005) {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            `Settle the ${Math.abs(balance).toFixed(2)} ${group.currency || 'AED'} you owe in “${group.name || 'this group'}” before deleting your account.`,
+          );
+        }
+        if (balance > 0.005 &&
+            (!data || data.acknowledgeUnsettled !== true)) {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'Acknowledge the unsettled balances owed to you before deleting your account.',
+          );
         }
       }
 
@@ -611,6 +689,66 @@ exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1G
         const groupDoc = await db.collection('groups').doc(groupId).get();
         if (groupDoc.exists) groupsToUpdate.set(groupId, groupDoc);
       }
+      let messageBatch = db.batch();
+      let messageWrites = 0;
+      // Query each retained group's messages separately. A collection-group
+      // query requires a manually-created index in this project, and would
+      // otherwise fail after destructive cleanup had already started.
+      for (const groupDoc of groupsToUpdate.values()) {
+        // Chat images are private to the sender's account path. Re-list the
+        // prefix after each deletion batch so retries safely resume even if a
+        // previous attempt stopped partway through.
+        const imagePrefix = `groups/${groupDoc.id}/chat/${uid}/`;
+        const bucket = admin.storage().bucket();
+        while (true) {
+          const [files] = await bucket.getFiles({ prefix: imagePrefix, maxResults: 100 });
+          if (files.length === 0) break;
+          await Promise.all(files.map((file) => file.delete({ ignoreNotFound: true })));
+        }
+
+        const messages = groupDoc.ref.collection('messages');
+        const [senderMessages, imageMessages] = await Promise.all([
+          messages.where('senderUid', '==', uid).get(),
+          // Also catch legacy message records that have the sender's Storage
+          // path but no senderUid field.
+          messages.where('imagePath', '>=', imagePrefix)
+            .where('imagePath', '<', `${imagePrefix}\uf8ff`).get(),
+        ]);
+        const messageDocs = new Map();
+        for (const doc of [...senderMessages.docs, ...imageMessages.docs]) {
+          messageDocs.set(doc.id, doc);
+        }
+        for (const messageDoc of messageDocs.values()) {
+          const message = messageDoc.data();
+          const update = {};
+          if (message.senderUid === uid ||
+              (typeof message.imagePath === 'string' && message.imagePath.startsWith(imagePrefix))) {
+            update.senderName = 'Former member';
+          }
+          if (typeof message.imagePath === 'string' && message.imagePath.startsWith(imagePrefix)) {
+            update.imagePath = admin.firestore.FieldValue.delete();
+          }
+          // Older clients stored a download URL rather than imagePath. These
+          // URLs are still account-owned chat images and must not outlive them.
+          if (message.senderUid === uid && typeof message.imageUrl === 'string') {
+            update.imageUrl = admin.firestore.FieldValue.delete();
+          }
+          if ((Object.prototype.hasOwnProperty.call(update, 'imagePath') ||
+              Object.prototype.hasOwnProperty.call(update, 'imageUrl')) &&
+              !String(message.text || '').trim()) update.text = '[image removed]';
+          messageBatch.update(messageDoc.ref, update);
+          messageWrites++;
+          if (messageWrites === 400) {
+            await messageBatch.commit();
+            messageBatch = db.batch();
+            messageWrites = 0;
+          }
+        }
+      }
+      if (messageWrites > 0) await messageBatch.commit();
+
+      // Keep membership discoverable until image and message cleanup finish,
+      // so a retry after a partial failure can still find every retained group.
       let groupBatch = db.batch();
       let groupWrites = 0;
       for (const doc of groupsToUpdate.values()) {
@@ -635,26 +773,6 @@ exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1G
       }
       if (groupWrites > 0) await groupBatch.commit();
 
-      let messageBatch = db.batch();
-      let messageWrites = 0;
-      // Query each retained group's messages separately. A collection-group
-      // query requires a manually-created index in this project, and would
-      // otherwise fail after destructive cleanup had already started.
-      for (const groupDoc of groupsToUpdate.values()) {
-        const messageSnapshot = await groupDoc.ref.collection('messages')
-          .where('senderUid', '==', uid).get();
-        for (const messageDoc of messageSnapshot.docs) {
-          messageBatch.update(messageDoc.ref, { senderName: 'Former member' });
-          messageWrites++;
-          if (messageWrites === 400) {
-            await messageBatch.commit();
-            messageBatch = db.batch();
-            messageWrites = 0;
-          }
-        }
-      }
-      if (messageWrites > 0) await messageBatch.commit();
-
       // Replace the profile with a non-PII tombstone and remove private push
       // tokens. The marker blocks writes if Auth deletion needs to be retried.
       const userRef = db.collection('users').doc(uid);
@@ -663,6 +781,9 @@ exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1G
         accountDeletionStartedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       await db.recursiveDelete(userRef.collection('private'));
+      // Contact lookup rate limits are stored separately from the profile and
+      // must also be removed when the account is deleted.
+      await db.collection('phoneLookupRateLimits').doc(uid).delete();
       try {
         await admin.auth().deleteUser(uid);
       } catch (error) {
@@ -690,7 +811,7 @@ exports.healthCheck = functions.https.onRequest((req, res) => {
 
 // Record an external pairwise settlement against existing expense shares.
 // This does not move money and never creates a synthetic expense/payment record.
-exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
+exports.recordPairSettlement = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to record a settlement.');
   }
@@ -882,7 +1003,7 @@ exports.recordPairSettlement = functions.https.onCall(async (data, context) => {
 // Atomically settles one person's combined net balance with another across
 // several groups in the same currency. Opposing debts are reconciled first;
 // only the net amount is treated as paid outside Nus·Nus.
-exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, context) => {
+exports.recordCrossGroupPairSettlement = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to record a settlement.');
   }
@@ -937,9 +1058,15 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
           throw new functions.https.HttpsError('permission-denied', 'The authenticated user must be exactly one side of each pair.');
         }
         const counterpart = fromIsMe ? toPerson : fromPerson;
+        // People who left or deleted their account all share the display name
+        // "Former member", so they must never be merged by name across groups.
+        const isFormerMember = counterpart.archived === true &&
+          String(counterpart.name || '') === 'Former member';
         const counterpartKey = counterpart.linkedUserId
           ? 'uid:' + counterpart.linkedUserId
-          : 'name:' + String(counterpart.name || '').trim().toLowerCase();
+          : isFormerMember
+            ? 'former:' + item.groupId + ':' + counterpart.id
+            : 'name:' + String(counterpart.name || '').trim().toLowerCase();
         const expensesRef = groupRef.collection('expenses');
         const expensesSnap = await tx.get(expensesRef);
         const docs = expensesSnap.docs.slice().sort((a, b) => {
@@ -1108,7 +1235,7 @@ exports.recordCrossGroupPairSettlement = functions.https.onCall(async (data, con
 // cross-group batch) by subtracting exactly what it allocated. Either person
 // in the pair may undo, which gives a creditor a way to dispute a payment the
 // debtor recorded. The log entry is kept, marked 'reverted'.
-exports.revertSettlement = functions.https.onCall(async (data, context) => {
+exports.revertSettlement = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in to undo a settlement.');
   }
@@ -1196,63 +1323,67 @@ exports.revertSettlement = functions.https.onCall(async (data, context) => {
 });
 
 
-// Batch lookup for contacts already stored on the device. Phone values are
-// processed transiently and are never persisted. The response contains only
-// matched UIDs and display names, keyed by the canonical input phone.
-exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, context) => {
+// Indexed batch lookup used by both contact matching and typed-number search.
+// Only canonical keys are queried; input phone numbers are never persisted.
+exports.lookupRegisteredUsersByPhones = callable.https.onCall(async (data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Sign in to match your contacts.');
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to match phone numbers.');
   }
   await assertAccountActive(context.auth.uid);
   const rawPhones = data && data.phoneNumbers;
-  if (!Array.isArray(rawPhones) || rawPhones.length < 1 || rawPhones.length > 500 ||
+  if (!Array.isArray(rawPhones) || rawPhones.length < 1 || rawPhones.length > 100 ||
       rawPhones.some((phone) => typeof phone !== 'string' || phone.length > 40)) {
-    throw new functions.https.HttpsError('invalid-argument', 'Send between 1 and 500 phone numbers.');
+    throw new functions.https.HttpsError('invalid-argument', 'Send between 1 and 100 phone numbers.');
+  }
+  const phoneKeys = [...new Set(rawPhones.map(normalizeLookupPhone)
+    .filter((phone) => phone.length >= 7 && phone.length <= 15))];
+  if (phoneKeys.length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'No valid phone numbers were provided.');
   }
 
-  const phoneKeys = [...new Set(rawPhones.map(normalizeLookupPhone).filter((phone) => phone.length >= 7 && phone.length <= 15))];
-  if (phoneKeys.length === 0) return { matches: {}, ambiguous: [] };
-
-  const limitRef = db.collection('phoneLookupRateLimits').doc(context.auth.uid);
+  const uid = context.auth.uid;
+  const limitRef = db.collection('phoneLookupRateLimits').doc(uid);
   const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
   try {
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(limitRef);
       const prior = snap.exists ? snap.data() : {};
-      const windowStart = Number(prior.windowStart || 0);
-      const count = windowStart > now - 60000 ? Number(prior.count || 0) : 0;
-      if (count >= 20) {
-        throw new functions.https.HttpsError('resource-exhausted', 'Too many contact searches. Please wait a minute and try again.');
+      const minuteStart = Number(prior.minuteWindowStart || 0);
+      const minuteCount = minuteStart > now - 60000
+        ? Number(prior.minuteCount || 0)
+        : 0;
+      const dailyCount = prior.dailyDate === today
+        ? Number(prior.dailyCount || 0)
+        : 0;
+      if (minuteCount >= 5) {
+        throw new functions.https.HttpsError('resource-exhausted', 'Too many phone searches. Please wait a minute and try again.');
       }
-      tx.set(limitRef, { windowStart: count === 0 ? now : windowStart, count: count + 1 });
+      if (dailyCount + phoneKeys.length > 1000) {
+        throw new functions.https.HttpsError('resource-exhausted', 'Daily phone search limit reached. Try again tomorrow.');
+      }
+      tx.set(limitRef, {
+        minuteWindowStart: minuteCount === 0 ? now : minuteStart,
+        minuteCount: minuteCount + 1,
+        dailyDate: today,
+        dailyCount: dailyCount + phoneKeys.length,
+      });
     });
 
-    // MVP fallback for legacy profiles: one collection scan per batch, not one
-    // scan per contact. Replace with indexed normalized fields after backfill.
-    const requested = new Set(phoneKeys);
     const matchesByPhone = new Map();
     const ambiguous = new Set();
-    const usersSnap = await db.collection('users').get();
-    for (const doc of usersSnap.docs) {
-      if (doc.id === context.auth.uid) continue;
-      // Read the current field plus legacy aliases used by older profile
-      // versions. Normalize each value before comparing; never return the
-      // stored phone number to the client.
-      const storedPhones = [
-        doc.get('phoneNumber'),
-        doc.get('phone'),
-        doc.get('mobile'),
-        doc.get('mobileNumber'),
-        doc.get('phone_number'),
-        doc.get('mobile_number'),
-      ].filter((value) => typeof value === 'string' && value.trim().length > 0);
-      const matchingPhones = [...new Set(storedPhones.map(normalizeLookupPhone)
-        .filter((phone) => requested.has(phone)))];
-      if (matchingPhones.length === 0) continue;
-      // If a profile contains multiple phone fields matching different contact
-      // entries, mark each canonical phone as ambiguous rather than linking
-      // the wrong person.
-      for (const phone of matchingPhones) {
+    const users = db.collection('users');
+    // Firestore supports at most 30 values in an `in` query. `phoneKey` has a
+    // single-field index, so each query reads only profiles with a requested key.
+    for (let start = 0; start < phoneKeys.length; start += 30) {
+      const chunk = phoneKeys.slice(start, start + 30);
+      const snap = await users.where('phoneKey', 'in', chunk).get();
+      for (const doc of snap.docs) {
+        if (doc.id === uid || doc.get('discoverableByPhone') === false) continue;
+        // Do not trust a client-written index key unless it still agrees with
+        // the profile's phone number.
+        if (normalizeLookupPhone(doc.get('phoneNumber') || '') !== doc.get('phoneKey')) continue;
+        const phone = doc.get('phoneKey');
         if (matchesByPhone.has(phone)) {
           matchesByPhone.delete(phone);
           ambiguous.add(phone);
@@ -1266,84 +1397,11 @@ exports.lookupRegisteredUsersByPhones = functions.https.onCall(async (data, cont
         }
       }
     }
-    const matches = {};
-    for (const [phone, user] of matchesByPhone.entries()) {
-      if (!ambiguous.has(phone)) matches[phone] = user;
-    }
+    const matches = Object.fromEntries(matchesByPhone);
     return { matches, ambiguous: [...ambiguous] };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
     console.error('lookupRegisteredUsersByPhones failed:', error);
-    throw new functions.https.HttpsError('internal', 'Could not match contacts. Please try again.');
-  }
-});
-
-// Looks up one registered account by the phone number already stored on its
-// profile. Profile documents remain private to clients; this callable returns
-// only the matching account's uid and display name.
-exports.lookupRegisteredUserByPhone = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Sign in to search registered users.');
-  }
-  await assertAccountActive(context.auth.uid);
-  const rawPhone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
-  const queryDigits = normalizeLookupPhone(rawPhone);
-  if (queryDigits.length < 7 || queryDigits.length > 15) {
-    throw new functions.https.HttpsError('invalid-argument', 'Enter at least 7 digits for a phone number.');
-  }
-
-  // Basic per-account rate limit: at most 20 lookup attempts per rolling minute.
-  const limitRef = db.collection('phoneLookupRateLimits').doc(context.auth.uid);
-  const now = Date.now();
-  try {
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(limitRef);
-      const prior = snap.exists ? snap.data() : {};
-      const windowStart = Number(prior.windowStart || 0);
-      const count = windowStart > now - 60000 ? Number(prior.count || 0) : 0;
-      if (count >= 20) {
-        throw new functions.https.HttpsError('resource-exhausted', 'Too many searches. Please wait a minute and try again.');
-      }
-      tx.set(limitRef, { windowStart: count === 0 ? now : windowStart, count: count + 1 });
-    });
-
-    // Existing profile phoneNumber values are used as requested, even if not
-    // verified. Do not expose other profiles or return phone/email to clients.
-    const usersSnap = await db.collection('users').get();
-    const matches = usersSnap.docs.filter((doc) => {
-      if (doc.id === context.auth.uid) return false;
-      const storedPhones = [
-        doc.get('phoneNumber'),
-        doc.get('phone'),
-        doc.get('mobile'),
-        doc.get('mobileNumber'),
-        doc.get('phone_number'),
-        doc.get('mobile_number'),
-      ];
-      return storedPhones.some((value) => {
-        if (typeof value !== 'string') return false;
-        const stored = normalizeLookupPhone(value);
-        return stored.length >= 7 && stored === queryDigits;
-      });
-    });
-    if (matches.length === 0) return { found: false };
-    if (matches.length > 1) {
-      // Ambiguous legacy data must not cause the wrong account to be added.
-      return { found: false, ambiguous: true };
-    }
-    const match = matches[0];
-    return {
-      found: true,
-      user: {
-        uid: match.id,
-        name: typeof match.get('name') === 'string' && match.get('name').trim()
-          ? match.get('name').trim()
-          : 'Nus·Nus user',
-      },
-    };
-  } catch (error) {
-    if (error instanceof functions.https.HttpsError) throw error;
-    console.error('lookupRegisteredUserByPhone failed:', error);
-    throw new functions.https.HttpsError('internal', 'Could not search registered users. Please try again.');
+    throw new functions.https.HttpsError('internal', 'Could not match phone numbers. Please try again.');
   }
 });

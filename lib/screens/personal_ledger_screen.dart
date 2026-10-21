@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../utils/currency_formatter.dart';
 import '../widgets/expense_form_sheet.dart';
 import '../widgets/branded_loader.dart';
+import '../widgets/app_dialog.dart';
 
 class PersonalLedgerScreen extends StatefulWidget {
   const PersonalLedgerScreen({super.key});
@@ -61,33 +62,14 @@ class _PersonalLedgerScreenState extends State<PersonalLedgerScreen> {
   }
 
   Future<void> _confirmDeleteNote(String groupId, GroupMessage message) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-        title: const Text('Delete this note?',
-            style:
-                TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This note will be removed from your personal ledger.',
-          style: TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Delete note'),
-          ),
-        ],
-      ),
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: AppColors.rust,
+      title: 'Delete this note?',
+      message: 'This note will be removed from your personal ledger.',
+      confirmText: 'Delete note',
+      confirmColor: AppColors.rust,
     );
     if (confirmed != true || !mounted) return;
 
@@ -107,33 +89,14 @@ class _PersonalLedgerScreenState extends State<PersonalLedgerScreen> {
 
   Future<void> _confirmDeleteExpense(
       BuildContext context, SplitProvider provider, Expense expense) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppColors.paper,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-        title: const Text('Delete expense?',
-            style:
-                TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold)),
-        content: Text(
-          '“${expense.desc}” will be removed from your personal ledger.',
-          style: const TextStyle(color: AppColors.slate),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: AppTheme.solidButton.copyWith(
-              backgroundColor: WidgetStateProperty.all(AppColors.rust),
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await AppDialog.showConfirm(
+      context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: AppColors.rust,
+      title: 'Delete expense?',
+      message: '“${expense.desc}” will be removed from your personal ledger.',
+      confirmText: 'Delete',
+      confirmColor: AppColors.rust,
     );
     if (confirmed != true || !context.mounted) return;
     final error = provider.removeExpense(expense.id);

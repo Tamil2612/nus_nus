@@ -266,9 +266,30 @@ test('settlement audit logs are readable by members but never client-writable', 
   }));
 });
 
+test('a personal ledger id can only be created by its own account', async () => {
+  const group = (uid) => ({
+    name: 'Personal',
+    ownerId: uid,
+    memberUids: [uid],
+    members: [],
+    isPersonal: true,
+  });
+  const attacker = env.authenticatedContext('member-b');
+  const owner = env.authenticatedContext('member-a');
+  await assertFails(setDoc(doc(attacker.firestore(), 'groups/personal_member-a'), group('member-b')));
+  await assertSucceeds(setDoc(doc(owner.firestore(), 'groups/personal_member-a'), group('member-a')));
+  // Ordinary groups are unaffected.
+  await assertSucceeds(setDoc(doc(attacker.firestore(), 'groups/some-new-group'), group('member-b')));
+});
+
 test('chat image Storage is private, size-limited, and member-only', async () => {
   const member = env.authenticatedContext('member-a');
   const outsider = env.authenticatedContext('outsider');
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users/member-a'), {
+      accountDeletionInProgress: false,
+    });
+  });
   storagePath = 'groups/g1/chat/member-a/rules-test.jpg';
   const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
   await assertSucceeds(uploadBytes(ref(member.storage(), storagePath), bytes, {

@@ -12,18 +12,40 @@ class AccountDeletionGroup {
   final String id;
   final String name;
   final List<AccountDeletionCandidate> candidates;
+  final double balance;
+  final String currency;
 
   const AccountDeletionGroup({
     required this.id,
     required this.name,
     required this.candidates,
+    required this.balance,
+    required this.currency,
+  });
+}
+
+class AccountDeletionBalance {
+  final String id;
+  final String name;
+  final String currency;
+  final double balance;
+
+  const AccountDeletionBalance({
+    required this.id,
+    required this.name,
+    required this.currency,
+    required this.balance,
   });
 }
 
 class AccountDeletionPlan {
   final List<AccountDeletionGroup> ownedGroups;
+  final List<AccountDeletionBalance> groupBalances;
 
-  const AccountDeletionPlan({required this.ownedGroups});
+  const AccountDeletionPlan({
+    required this.ownedGroups,
+    required this.groupBalances,
+  });
 }
 
 class AccountDeletionRepository {
@@ -57,16 +79,35 @@ class AccountDeletionRepository {
             id: group['groupId'] as String? ?? '',
             name: group['name'] as String? ?? 'Untitled group',
             candidates: candidates,
+            balance: (group['balance'] as num?)?.toDouble() ?? 0,
+            currency: group['currency'] as String? ?? 'AED',
           );
         })
         .where((group) => group.id.isNotEmpty)
         .toList();
-    return AccountDeletionPlan(ownedGroups: groups);
+    final groupBalances = (data['groupBalances'] as List? ?? const [])
+        .whereType<Map>()
+        .map((rawGroup) {
+          final group = Map<String, dynamic>.from(rawGroup);
+          return AccountDeletionBalance(
+            id: group['groupId'] as String? ?? '',
+            name: group['name'] as String? ?? 'Untitled group',
+            currency: group['currency'] as String? ?? 'AED',
+            balance: (group['balance'] as num?)?.toDouble() ?? 0,
+          );
+        })
+        .where((group) => group.id.isNotEmpty)
+        .toList();
+    return AccountDeletionPlan(
+      ownedGroups: groups,
+      groupBalances: groupBalances,
+    );
   }
 
   Future<void> deleteAccount({
     required Map<String, String> transfers,
     required List<String> deleteGroupIds,
+    required bool acknowledgeUnsettled,
   }) async {
     if (FirebaseAuth.instance.currentUser == null) {
       throw FirebaseFunctionsException(
@@ -78,6 +119,7 @@ class AccountDeletionRepository {
     await callable.call({
       'transfers': transfers,
       'deleteGroupIds': deleteGroupIds,
+      'acknowledgeUnsettled': acknowledgeUnsettled,
     });
   }
 }

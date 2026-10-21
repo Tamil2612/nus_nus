@@ -1,4 +1,0 @@
-- [x] Update `pubspec.yaml` to use `google_generative_ai`
-- [x] Clean up `main.dart` from App Check logic
-- [x] Refactor `GeminiAiService` for direct client-side access
-- [x] Verify AI parsing and chat functionality

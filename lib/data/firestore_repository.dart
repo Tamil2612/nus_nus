@@ -130,6 +130,7 @@ class FirestoreRepository {
   Future<void> leaveGroup(
     String groupId, {
     String? transferToUid,
+    bool acknowledgeUnsettled = false,
   }) async {
     if (FirebaseAuth.instance.currentUser == null) {
       throw FirebaseFunctionsException(
@@ -142,6 +143,7 @@ class FirestoreRepository {
     await callable.call({
       'groupId': groupId,
       if (transferToUid != null) 'transferToUid': transferToUid,
+      'acknowledgeUnsettled': acknowledgeUnsettled,
     });
   }
 
