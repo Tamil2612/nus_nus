@@ -7,7 +7,7 @@ const {
   subtractAllocations,
   canRevert,
   settlementAllocationTargets,
-  netBalanceForPerson,
+  balancesByCounterparty,
 } = require('./settlement_log');
 
 // Initialize Firebase Admin
@@ -378,16 +378,18 @@ exports.leaveGroup = callable.https.onCall(async (data, context) => {
       const person = members.find((member) => member && member.linkedUserId === uid) ||
         (isOwner ? members.find((member) => member && Number(member.id) === 1) : null);
       const expensesSnap = await tx.get(groupRef.collection('expenses'));
-      const balance = person
-        ? netBalanceForPerson(expensesSnap.docs.map((doc) => doc.data()), person.id)
-        : 0;
-      if (balance < -0.005) {
+      const pairBalances = person
+        ? Object.values(balancesByCounterparty(
+          expensesSnap.docs.map((doc) => doc.data()), person.id))
+        : [];
+      if (pairBalances.some((balance) => balance < -0.005)) {
         throw new functions.https.HttpsError(
           'failed-precondition',
-          `Settle the ${Math.abs(balance).toFixed(2)} ${group.currency || 'AED'} you owe before leaving this group.`,
+          `Settle every amount you owe to other members before leaving this group.`,
         );
       }
-      if (balance > 0.005 && (!data || data.acknowledgeUnsettled !== true)) {
+      if (pairBalances.some((balance) => balance > 0.005) &&
+          (!data || data.acknowledgeUnsettled !== true)) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           'Acknowledge the unsettled balance owed to you before leaving this group.',
@@ -454,16 +456,26 @@ async function getGroupsForAccount(uid) {
   return [...byId.values()];
 }
 
-async function getGroupNetBalance(groupDoc, uid) {
+async function getGroupPairBalances(groupDoc, uid) {
   const group = groupDoc.data();
   const members = Array.isArray(group.members) ? group.members : [];
   const person = members.find((member) => member && member.linkedUserId === uid) ||
     (group.ownerId === uid
       ? members.find((member) => member && Number(member.id) === 1)
       : null);
-  if (!person) return 0;
+  if (!person) return [];
   const expenses = await groupDoc.ref.collection('expenses').get();
-  return netBalanceForPerson(expenses.docs.map((doc) => doc.data()), person.id);
+  const balances = balancesByCounterparty(
+    expenses.docs.map((doc) => doc.data()), person.id);
+  return Object.entries(balances).map(([personId, balance]) => {
+    const counterparty = members.find((member) =>
+      member && String(member.id) === personId);
+    return {
+      personId,
+      personName: String(counterparty && counterparty.name || 'Former member'),
+      balance,
+    };
+  });
 }
 
 // Returns the owner handoff choices before the UI asks the user to confirm
@@ -478,11 +490,13 @@ exports.getAccountDeletionPlan = callable.https.onCall(async (_data, context) =>
     const sharedGroups = groups.filter((doc) => doc.data().isPersonal !== true);
     const groupBalances = await Promise.all(sharedGroups.map(async (doc) => {
       const group = doc.data();
+      const counterpartyBalances = await getGroupPairBalances(doc, uid);
       return {
         groupId: doc.id,
         name: String(group.name || 'Untitled group').slice(0, 100),
         currency: String(group.currency || 'AED').toUpperCase(),
-        balance: await getGroupNetBalance(doc, uid),
+        balance: counterpartyBalances.reduce((sum, item) => sum + item.balance, 0),
+        counterpartyBalances,
       };
     }));
     const balanceById = new Map(groupBalances.map((item) => [item.groupId, item]));
@@ -616,14 +630,14 @@ exports.deleteAccountData = functions.runWith({ timeoutSeconds: 540, memory: '1G
       for (const groupDoc of accountGroups) {
         const group = groupDoc.data();
         if (group.isPersonal === true) continue;
-        const balance = await getGroupNetBalance(groupDoc, uid);
-        if (balance < -0.005) {
+        const pairBalances = await getGroupPairBalances(groupDoc, uid);
+        if (pairBalances.some((item) => item.balance < -0.005)) {
           throw new functions.https.HttpsError(
             'failed-precondition',
-            `Settle the ${Math.abs(balance).toFixed(2)} ${group.currency || 'AED'} you owe in “${group.name || 'this group'}” before deleting your account.`,
+            `Settle every amount you owe to other members in “${group.name || 'this group'}” before deleting your account.`,
           );
         }
-        if (balance > 0.005 &&
+        if (pairBalances.some((item) => item.balance > 0.005) &&
             (!data || data.acknowledgeUnsettled !== true)) {
           throw new functions.https.HttpsError(
             'failed-precondition',

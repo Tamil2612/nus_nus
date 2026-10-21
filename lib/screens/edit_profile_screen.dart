@@ -291,11 +291,13 @@ class _AccountDeletionDialogState extends State<AccountDeletionDialog> {
   bool _acknowledgeUnsettled = false;
 
   bool get _hasUnsettledDebt => widget.plan.groupBalances.any(
-        (balance) => balance.balance < -0.005,
+        (group) =>
+            group.counterparties.any((balance) => balance.balance < -0.005),
       );
 
   bool get _hasUnsettledCredit => widget.plan.groupBalances.any(
-        (balance) => balance.balance > 0.005,
+        (group) =>
+            group.counterparties.any((balance) => balance.balance > 0.005),
       );
 
   bool get _canContinue =>
@@ -827,22 +829,49 @@ class _AccountDeletionDialogState extends State<AccountDeletionDialog> {
         group.id == balance.id && _deleteGroupIds.contains(group.id));
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 5.h),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Text(
-              balance.name + (deleting ? ' · will be deleted' : ''),
-              style: TextStyle(color: AppColors.ink, fontSize: 11.sp),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  balance.name + (deleting ? ' · will be deleted' : ''),
+                  style: TextStyle(color: AppColors.ink, fontSize: 11.sp),
+                ),
+              ),
+              Text(
+                balance.counterparties.isEmpty
+                    ? 'Settled'
+                    : '${balance.counterparties.length} pair(s)',
+                style: TextStyle(color: AppColors.slate, fontSize: 10.sp),
+              ),
+            ],
           ),
-          Text(
-            _balanceLabel(balance.balance, balance.currency),
-            style: TextStyle(
-              color: _balanceColor(balance.balance),
-              fontSize: 11.sp,
-              fontWeight: FontWeight.w700,
+          if (balance.counterparties.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(left: 8.w, top: 2.h),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final pair in balance.counterparties)
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 2.h),
+                      child: Text(
+                        pair.balance > 0
+                            ? '${pair.personName} owes you ${pair.balance.toStringAsFixed(2)} ${balance.currency}'
+                            : 'You owe ${pair.personName} ${(-pair.balance).toStringAsFixed(2)} ${balance.currency}',
+                        style: TextStyle(
+                          color: pair.balance < -0.005
+                              ? AppColors.rust
+                              : AppColors.ink,
+                          fontSize: 10.sp,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

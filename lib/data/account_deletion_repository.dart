@@ -29,11 +29,23 @@ class AccountDeletionBalance {
   final String name;
   final String currency;
   final double balance;
+  final List<AccountDeletionCounterpartyBalance> counterparties;
 
   const AccountDeletionBalance({
     required this.id,
     required this.name,
     required this.currency,
+    required this.balance,
+    required this.counterparties,
+  });
+}
+
+class AccountDeletionCounterpartyBalance {
+  final String personName;
+  final double balance;
+
+  const AccountDeletionCounterpartyBalance({
+    required this.personName,
     required this.balance,
   });
 }
@@ -89,11 +101,22 @@ class AccountDeletionRepository {
         .whereType<Map>()
         .map((rawGroup) {
           final group = Map<String, dynamic>.from(rawGroup);
+          final counterparties =
+              (group['counterpartyBalances'] as List? ?? const [])
+                  .whereType<Map>()
+                  .map((rawBalance) {
+            final item = Map<String, dynamic>.from(rawBalance);
+            return AccountDeletionCounterpartyBalance(
+              personName: item['personName'] as String? ?? 'Former member',
+              balance: (item['balance'] as num?)?.toDouble() ?? 0,
+            );
+          }).toList();
           return AccountDeletionBalance(
             id: group['groupId'] as String? ?? '',
             name: group['name'] as String? ?? 'Untitled group',
             currency: group['currency'] as String? ?? 'AED',
             balance: (group['balance'] as num?)?.toDouble() ?? 0,
+            counterparties: counterparties,
           );
         })
         .where((group) => group.id.isNotEmpty)

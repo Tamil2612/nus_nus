@@ -63,13 +63,17 @@ function settlementAllocationTargets({ reverseCents, legacyForwardCents, legacyR
   };
 }
 
-// Returns a person's signed group balance in major currency units: positive
-// means the group owes them, negative means they owe the group. This mirrors
-// SettlementCalculator's ledger rules, including partial settlements and
-// legacy negative settlement cards.
-function netBalanceForPerson(expenses, personId) {
+// Returns pairwise balances in major currency units, keyed by counterparty ID.
+// Positive means the counterparty owes this person; negative means this person
+// owes the counterparty. Opposite debts with different people never cancel.
+function balancesByCounterparty(expenses, personId) {
   const targetId = String(personId);
-  let balanceCents = 0;
+  const balances = {};
+  const add = (counterpartyId, cents) => {
+    const key = String(counterpartyId);
+    if (key === targetId || !Number.isFinite(cents)) return;
+    balances[key] = (balances[key] || 0) + cents;
+  };
 
   const outstandingCents = (expense, id) => {
     const key = String(id);
@@ -100,8 +104,8 @@ function netBalanceForPerson(expenses, personId) {
       for (const [creditorId, amount] of Object.entries(splits)) {
         const cents = Math.round(Number(amount) * 100);
         if (creditorId === payerId || !Number.isFinite(cents) || cents <= 0) continue;
-        if (payerId === targetId) balanceCents += cents;
-        if (creditorId === targetId) balanceCents -= cents;
+        if (payerId === targetId) add(creditorId, cents);
+        if (creditorId === targetId) add(payerId, -cents);
       }
       continue;
     }
@@ -109,14 +113,23 @@ function netBalanceForPerson(expenses, personId) {
     if (payerId === targetId) {
       for (const [debtorId] of Object.entries(splits)) {
         if (debtorId === payerId) continue;
-        balanceCents += outstandingCents(expense, debtorId);
+        add(debtorId, outstandingCents(expense, debtorId));
       }
     } else {
-      balanceCents -= outstandingCents(expense, targetId);
+      add(payerId, -outstandingCents(expense, targetId));
     }
   }
 
-  return Math.round(balanceCents) / 100;
+  return Object.fromEntries(Object.entries(balances)
+    .map(([id, cents]) => [id, Math.round(cents) / 100])
+    .filter(([, balance]) => Math.abs(balance) > 0.005));
+}
+
+// Returns the signed net summary for display only. Enforcement must use the
+// pairwise result above so debts with different people cannot offset.
+function netBalanceForPerson(expenses, personId) {
+  return Math.round(Object.values(balancesByCounterparty(expenses, personId))
+    .reduce((total, balance) => total + Math.round(balance * 100), 0)) / 100;
 }
 
 // Either person in the debtor/creditor pair may undo a settlement.
@@ -131,5 +144,6 @@ module.exports = {
   subtractAllocations,
   canRevert,
   settlementAllocationTargets,
+  balancesByCounterparty,
   netBalanceForPerson,
 };

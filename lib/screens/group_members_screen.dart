@@ -68,7 +68,9 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     String? transferToUid;
     var shouldDeleteGroup = false;
     var acknowledgeUnsettled = false;
-    final balance = _myGroupBalance(provider, group);
+    final balances = _myGroupBalances(provider, group);
+    final owesSomeone = balances.values.any((balance) => balance < -0.005);
+    final someoneOwes = balances.values.any((balance) => balance > 0.005);
 
     if (isOwner) {
       final candidates = group.members
@@ -78,7 +80,7 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
               member.linkedUserId != provider.uid &&
               group.memberUids.contains(member.linkedUserId))
           .toList();
-      final decision = await _ownerLeaveDialog(group, candidates, balance);
+      final decision = await _ownerLeaveDialog(group, candidates, balances);
       if (decision == null || !mounted) return;
       transferToUid = decision.transferToUid;
       shouldDeleteGroup = decision.deleteGroup;
@@ -89,15 +91,14 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
         return;
       }
     } else {
-      if (balance < -0.005) {
+      if (owesSomeone) {
         await showDialog<void>(
           context: context,
           builder: (dialogContext) => AppDialog(
             icon: Icons.account_balance_wallet_outlined,
             iconColor: AppColors.brass,
             title: 'Settle your balance first',
-            message:
-                'You owe ${(-balance).toStringAsFixed(2)} ${group.currency}. Settle this balance before leaving the group.',
+            message: _pairBalanceDescription(group, balances, onlyDebts: true),
             showCancel: false,
             confirmText: 'Close',
             confirmColor: AppColors.ink,
@@ -115,21 +116,20 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
             title: 'Leave “${group.name}”?',
             confirmText: 'Leave group',
             confirmColor: AppColors.rust,
-            isConfirmDisabled: balance > 0.005 && !acknowledgeUnsettled,
+            isConfirmDisabled: someoneOwes && !acknowledgeUnsettled,
             onConfirm: () => Navigator.pop(
               dialogContext,
-              _LeaveGroupDecision(
-                  acknowledgeUnsettled: acknowledgeUnsettled),
+              _LeaveGroupDecision(acknowledgeUnsettled: acknowledgeUnsettled),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Current balance: ${_balanceLabel(balance, group.currency)}. Your old member and chat names will show as “Former member”.',
+                  '${_pairBalanceDescription(group, balances)} Your old member and chat names will show as “Former member”.',
                   style: const TextStyle(color: AppColors.slate, height: 1.4),
                 ),
-                if (balance > 0.005)
+                if (someoneOwes)
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: acknowledgeUnsettled,
@@ -180,8 +180,10 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
   Future<_OwnerLeaveDecision?> _ownerLeaveDialog(
     Group group,
     List<Person> candidates,
-    double balance,
+    Map<int, double> balances,
   ) async {
+    final owesSomeone = balances.values.any((balance) => balance < -0.005);
+    final someoneOwes = balances.values.any((balance) => balance > 0.005);
     String? selectedUid;
     var deleteGroup = false;
     var acknowledgeUnsettled = false;
@@ -210,13 +212,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                 ),
                 10.verticalSpace,
                 Text(
-                  'Current balance: ${_balanceLabel(balance, group.currency)}.',
+                  _pairBalanceDescription(group, balances),
                   style: TextStyle(
-                    color: balance < -0.005 ? AppColors.rust : AppColors.ink,
+                    color: owesSomeone ? AppColors.rust : AppColors.ink,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (balance < -0.005 && candidates.isNotEmpty)
+                if (owesSomeone && candidates.isNotEmpty)
                   Padding(
                     padding: EdgeInsets.only(top: 6.h),
                     child: Text(
@@ -228,7 +230,7 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                       ),
                     ),
                   ),
-                if (balance > 0.005 && candidates.isNotEmpty)
+                if (someoneOwes && candidates.isNotEmpty)
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: acknowledgeUnsettled,
@@ -305,8 +307,8 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
             FilledButton(
               onPressed: deleteGroup ||
                       (selectedUid != null &&
-                          balance >= -0.005 &&
-                          (balance <= 0.005 || acknowledgeUnsettled))
+                          !owesSomeone &&
+                          (!someoneOwes || acknowledgeUnsettled))
                   ? () => Navigator.pop(
                         dialogContext,
                         _OwnerLeaveDecision(
@@ -331,9 +333,9 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     );
   }
 
-  double _myGroupBalance(SplitProvider provider, Group group) {
+  Map<int, double> _myGroupBalances(SplitProvider provider, Group group) {
     final uid = provider.uid;
-    if (uid == null) return 0;
+    if (uid == null) return const {};
     Person? me;
     for (final member in group.members) {
       if (member.linkedUserId == uid) {
@@ -349,20 +351,41 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
         }
       }
     }
-    if (me == null) return 0;
-    final balances = SettlementCalculator.computeBalances(
-      personIds: group.members.map((member) => member.id).toList(),
-      expenses: provider.expenses,
+    if (me == null) return const {};
+    final pairs = SettlementCalculator.computePairBalances(
+      SettlementCalculator.deriveLedgerEntries(provider.expenses),
     );
-    return balances[me.id] ?? 0;
+    final balances = <int, double>{};
+    for (final pair in pairs) {
+      if (pair.personAId == me.id) {
+        balances[pair.personBId] = -pair.amount;
+      } else if (pair.personBId == me.id) {
+        balances[pair.personAId] = pair.amount;
+      }
+    }
+    return balances;
   }
 
-  String _balanceLabel(double balance, String currency) {
-    if (balance > 0.005) return 'owed ${balance.toStringAsFixed(2)} $currency';
-    if (balance < -0.005) {
-      return 'you owe ${(-balance).toStringAsFixed(2)} $currency';
+  String _pairBalanceDescription(
+    Group group,
+    Map<int, double> balances, {
+    bool onlyDebts = false,
+  }) {
+    final details = <String>[];
+    for (final entry in balances.entries) {
+      if (entry.value.abs() <= 0.005 || (onlyDebts && entry.value > 0)) {
+        continue;
+      }
+      final member = group.members.where((person) => person.id == entry.key);
+      final name = member.isEmpty ? 'Former member' : member.first.name;
+      final amount = entry.value.abs().toStringAsFixed(2);
+      details.add(entry.value < 0
+          ? 'You owe $name $amount ${group.currency}'
+          : '$name owes you $amount ${group.currency}');
     }
-    return 'settled';
+    return details.isEmpty
+        ? 'No unsettled balances.'
+        : '${details.join('. ')}.';
   }
 
   Future<void> _editGroup(Group group) async {

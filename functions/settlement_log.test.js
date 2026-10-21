@@ -7,6 +7,7 @@ const {
   subtractAllocations,
   canRevert,
   settlementAllocationTargets,
+  balancesByCounterparty,
   netBalanceForPerson,
 } = require('./settlement_log');
 
@@ -160,4 +161,16 @@ test('netBalanceForPerson ignores the payer share and malformed input', () => {
     null,
   ], 1), 2.35);
   assert.equal(netBalanceForPerson([], 1), 0);
+});
+
+test('pairwise balances do not cancel debts owed to different people', () => {
+  const expenses = [
+    { payerId: 2, splitMap: { 1: 100, 2: 0 } },
+    { payerId: 1, splitMap: { 1: 0, 3: 100 } },
+  ];
+  const balances = balancesByCounterparty(expenses, 1);
+  assert.deepEqual(balances, { 2: -100, 3: 100 });
+  assert.equal(netBalanceForPerson(expenses, 1), 0);
+  assert.ok(Object.values(balances).some((balance) => balance < -0.005));
+  assert.ok(Object.values(balances).some((balance) => balance > 0.005));
 });
