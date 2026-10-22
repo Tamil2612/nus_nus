@@ -26,6 +26,12 @@ dependencies:
   share_plus: ^13.3.1
   url_launcher: ^6.3.2
 
+# shared_preferences_android 2.5.1's JNI-backed implementation throws a
+# NoSuchMethodError in release builds on some devices. Keep the stable
+# platform-channel implementation until that upstream issue is resolved.
+dependency_overrides:
+  shared_preferences_android: 2.4.28
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -131,6 +131,15 @@ Enable the services required by your chosen features:
 - Firebase Cloud Messaging for push notifications
 - Firebase Hosting if deploying the web build
 
+Android release builds use Firebase App Check with Play Integrity. For an APK
+installed directly over USB, Play Integrity may not recognize the install. To
+test a sideloaded release, build with
+`--dart-define=FIREBASE_APP_CHECK_DEBUG=true`, then register that installation's
+App Check debug token in Firebase Console under **App Check → Manage debug
+tokens**. Do not set this define for Play-distributed production builds; those
+must use Play Integrity and the signing certificate configured for the Firebase
+Android app.
+
 Before deploying, verify the active Firebase project:
 
 ```bash

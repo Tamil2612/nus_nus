@@ -161,8 +161,10 @@ class NotificationService {
         NotificationEnableStatus.permissionRequired,
         message: 'Permission is allowed; finish registering this device.',
       );
-    } catch (_) {
-      return const NotificationEnableResult(
+    } catch (error, stackTrace) {
+      debugPrint('NotificationService.statusFor failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return NotificationEnableResult(
         NotificationEnableStatus.registrationFailed,
         message: 'Could not check notification settings. Please try again.',
       );
@@ -213,8 +215,9 @@ class NotificationService {
         );
       }
       return await _registerAuthorizedUser(uid, generation);
-    } catch (_) {
-      debugPrint('NotificationService initialization failed.');
+    } catch (error, stackTrace) {
+      debugPrint('NotificationService initialization failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       return const NotificationEnableResult(
         NotificationEnableStatus.registrationFailed,
         message: 'Could not initialize notifications. Please try again.',
@@ -263,8 +266,10 @@ class NotificationService {
         );
       }
       return await _registerAuthorizedUser(uid, generation);
-    } catch (_) {
-      return const NotificationEnableResult(
+    } catch (error, stackTrace) {
+      debugPrint('NotificationService.enableNotifications failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return NotificationEnableResult(
         NotificationEnableStatus.registrationFailed,
         message:
             'Could not enable notifications. Check your connection and try again.',
@@ -321,7 +326,9 @@ class NotificationService {
     String uid,
     int generation,
   ) async {
+    var failedAt = 'starting registration';
     try {
+      failedAt = 'preparing notification listeners';
       await _detach();
       if (generation != _sessionGeneration || _requestedUid != uid) {
         return _sessionChangedResult;
@@ -366,6 +373,7 @@ class NotificationService {
         onError: (Object _) => debugPrint('Notification token refresh failed.'),
       );
 
+      failedAt = 'requesting an FCM token';
       final token = await _fetchToken();
       if (_activeUid != uid || generation != _sessionGeneration) {
         return _sessionChangedResult;
@@ -374,6 +382,7 @@ class NotificationService {
         throw StateError('Notification token was not returned.');
       }
       _token = token;
+      failedAt = 'saving the FCM token to Firestore';
       await _saveToken(uid, token);
       if (_activeUid != uid || generation != _sessionGeneration) {
         return _sessionChangedResult;
@@ -381,6 +390,7 @@ class NotificationService {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setBool(_notificationsEnabledKey(uid), true);
       _registeredUid = uid;
+      failedAt = 'checking for a notification that opened the app';
       final initial = await _messaging.getInitialMessage();
       if (initial != null &&
           _activeUid == uid &&
@@ -388,14 +398,17 @@ class NotificationService {
         _publish(PushEventKind.opened, initial);
       }
       return const NotificationEnableResult(NotificationEnableStatus.enabled);
-    } catch (_) {
-      debugPrint('NotificationService token registration failed.');
+    } catch (error, stackTrace) {
+      debugPrint(
+        'NotificationService registration failed while $failedAt: $error',
+      );
+      debugPrintStack(stackTrace: stackTrace);
       if (_activeUid == uid && generation == _sessionGeneration) {
         _activeUid = null;
         _registeredUid = null;
         await _detach();
       }
-      return const NotificationEnableResult(
+      return NotificationEnableResult(
         NotificationEnableStatus.registrationFailed,
         message:
             'Could not register this device. Check your connection and try again.',

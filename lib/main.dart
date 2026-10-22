@@ -12,6 +12,12 @@ import 'services/push_navigation.dart';
 import 'widgets/app_loading_overlay.dart';
 import 'theme/app_theme.dart';
 
+// Use only for local/sideloaded builds when the Play Integrity provider cannot
+// recognize the installation. Register the debug token in Firebase Console.
+// Production builds must leave this unset and use Play Integrity.
+const bool _useDebugAppCheck =
+    bool.fromEnvironment('FIREBASE_APP_CHECK_DEBUG');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -25,10 +31,10 @@ Future<void> main() async {
   // Play Integrity.
   await FirebaseAppCheck.instance.activate(
     providerWeb: ReCaptchaV3Provider('6LdDD20tAAAAAOzELBUSgYE3PKsBdzKprh8gJ5rv'),
-    providerAndroid: kDebugMode
+    providerAndroid: (kDebugMode || _useDebugAppCheck)
         ? const AndroidDebugProvider()
         : const AndroidPlayIntegrityProvider(),
-    providerApple: kDebugMode
+    providerApple: (kDebugMode || _useDebugAppCheck)
         ? const AppleDebugProvider()
         : const AppleDeviceCheckProvider(), // Or const AppleAppAttestWithDeviceCheckFallbackProvider()
   );
