@@ -305,6 +305,176 @@ exports.onGroupMessageCreated = functions.firestore
     return null;
   });
 
+function expenseError(message) {
+  throw new functions.https.HttpsError('invalid-argument', message);
+}
+
+function normalizeExpenseInput(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    expenseError('Invalid expense data.');
+  }
+  const desc = typeof raw.desc === 'string' ? raw.desc.trim() : '';
+  const amount = Number(raw.amount);
+  const payerId = Number(raw.payerId);
+  const splitMap = raw.splitMap;
+  const settledBy = raw.settledBy;
+  const isSettlement = raw.isSettlement;
+  if (!desc || desc.length > 200 || !Number.isFinite(amount) || amount <= 0 ||
+      amount > 100000000 || !Number.isSafeInteger(payerId) ||
+      !splitMap || typeof splitMap !== 'object' || Array.isArray(splitMap) ||
+      !Array.isArray(settledBy) || isSettlement !== false) {
+    expenseError('Invalid expense fields.');
+  }
+
+  const amountCents = Math.round(amount * 100);
+  if (Math.abs(amountCents / 100 - amount) > 0.005) {
+    expenseError('Expense amounts must be in whole cents.');
+  }
+  const normalizedSplits = {};
+  let splitTotalCents = 0;
+  for (const [rawId, rawShare] of Object.entries(splitMap)) {
+    const personId = String(rawId);
+    const share = Number(rawShare);
+    const shareCents = Math.round(share * 100);
+    if (!/^\d+$/.test(personId) || !Number.isFinite(share) || share < 0 ||
+        share > amount || Math.abs(shareCents / 100 - share) > 0.005) {
+      expenseError('Expense shares must be valid non-negative amounts.');
+    }
+    normalizedSplits[personId] = shareCents / 100;
+    splitTotalCents += shareCents;
+  }
+  if (Object.keys(normalizedSplits).length === 0 ||
+      splitTotalCents !== amountCents) {
+    expenseError('Expense shares must add up exactly to the expense amount.');
+  }
+
+  const normalizedSettledBy = [...new Set(settledBy.map(String))];
+  return {
+    desc,
+    amount: amountCents / 100,
+    amountCents,
+    payerId,
+    splitMap: normalizedSplits,
+    settledBy: normalizedSettledBy,
+  };
+}
+
+function validateExpensePeople(expense, group) {
+  const people = Array.isArray(group.members) ? group.members : [];
+  const personIds = new Set(people
+    .filter((person) => person && Number.isSafeInteger(Number(person.id)))
+    .map((person) => String(Number(person.id))));
+  if (!personIds.has(String(expense.payerId)) ||
+      Object.keys(expense.splitMap).some((id) => !personIds.has(id)) ||
+      expense.settledBy.some((id) => !Object.prototype.hasOwnProperty.call(expense.splitMap, id))) {
+    expenseError('The payer and every split participant must belong to this group.');
+  }
+}
+
+// Expense financial fields are validated server-side because Firestore rules
+// cannot safely sum a dynamic map of shares. Clients must use this callable;
+// Admin SDK writes bypass the client rules after all checks have passed.
+exports.saveExpense = callable.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to save an expense.');
+  }
+  await assertAccountActive(context.auth.uid);
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  const expenseId = typeof data.expenseId === 'string' ? data.expenseId.trim() : '';
+  const operation = data.operation;
+  if (!groupId || groupId.includes('/') || groupId.length > 200 ||
+      !expenseId || expenseId.includes('/') || expenseId.length > 200 ||
+      !['create', 'update', 'toggleSettledBy'].includes(operation)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid expense request.');
+  }
+
+  const groupRef = db.collection('groups').doc(groupId);
+  const expenseRef = groupRef.collection('expenses').doc(expenseId);
+  try {
+    return await db.runTransaction(async (tx) => {
+      const groupSnap = await tx.get(groupRef);
+      if (!groupSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Group not found.');
+      }
+      const group = groupSnap.data();
+      if (!Array.isArray(group.memberUids) || !group.memberUids.includes(context.auth.uid)) {
+        throw new functions.https.HttpsError('permission-denied', 'You are not a member of this group.');
+      }
+
+      if (operation === 'create') {
+        const expense = normalizeExpenseInput(data.expense);
+        validateExpensePeople(expense, group);
+        if (expense.settledBy.some((id) => id !== String(expense.payerId))) {
+          expenseError('Only the payer may be initially marked as settled.');
+        }
+        tx.create(expenseRef, {
+          desc: expense.desc,
+          amount: expense.amount,
+          payerId: expense.payerId,
+          splitMap: expense.splitMap,
+          isSettlement: false,
+          settledBy: expense.settledBy,
+          settledAmounts: {},
+          addedBy: context.auth.uid,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return { success: true };
+      }
+
+      const currentSnap = await tx.get(expenseRef);
+      if (!currentSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Expense not found.');
+      }
+      const current = currentSnap.data();
+      if (current.addedBy !== context.auth.uid) {
+        throw new functions.https.HttpsError('permission-denied', 'Only the expense author can edit it.');
+      }
+      if (current.isSettlement === true) {
+        throw new functions.https.HttpsError('failed-precondition', 'Legacy settlement expenses cannot be edited.');
+      }
+
+      if (operation === 'toggleSettledBy') {
+        const settledBy = data.settledBy;
+        if (!Array.isArray(settledBy)) expenseError('Invalid settlement status.');
+        const normalized = [...new Set(settledBy.map(String))];
+        const currentSplitMap = current.splitMap || {};
+        if (normalized.some((id) => !Object.prototype.hasOwnProperty.call(currentSplitMap, id))) {
+          expenseError('Only participants in the expense can be marked as settled.');
+        }
+        tx.update(expenseRef, { settledBy: normalized });
+        return { success: true };
+      }
+
+      const expense = normalizeExpenseInput(data.expense);
+      validateExpensePeople(expense, group);
+      const currentSettledAmounts = current.settledAmounts || {};
+      const hasPairSettlement = Object.values(currentSettledAmounts)
+        .some((value) => Number(value) > 0.005);
+      if (hasPairSettlement &&
+          (expense.amountCents !== Math.round(Number(current.amount) * 100) ||
+            JSON.stringify(expense.splitMap) !== JSON.stringify(current.splitMap))) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'This expense has a recorded pair settlement and its amount or split cannot change.',
+        );
+      }
+      tx.update(expenseRef, {
+        desc: expense.desc,
+        amount: expense.amount,
+        payerId: current.payerId,
+        splitMap: expense.splitMap,
+        isSettlement: false,
+        settledBy: expense.settledBy,
+      });
+      return { success: true };
+    });
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('saveExpense failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not save the expense.');
+  }
+});
+
 // Owner-only group deletion callable. The client cannot delete expenses added
 // by other members, so recursive deletion must run with Admin privileges.
 exports.deleteGroup = callable.https.onCall(async (data, context) => {
@@ -1370,11 +1540,17 @@ exports.lookupRegisteredUsersByPhones = callable.https.onCall(async (data, conte
       const dailyCount = prior.dailyDate === today
         ? Number(prior.dailyCount || 0)
         : 0;
-      if (minuteCount >= 5) {
-        throw new functions.https.HttpsError('resource-exhausted', 'Too many phone searches. Please wait a minute and try again.');
+      if (minuteCount >= 10) {
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          'Too many phone searches. Please wait a minute and try again.',
+        );
       }
-      if (dailyCount + phoneKeys.length > 1000) {
-        throw new functions.https.HttpsError('resource-exhausted', 'Daily phone search limit reached. Try again tomorrow.');
+      if (dailyCount + phoneKeys.length > 2000) {
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          'Daily phone search limit reached. Try again tomorrow.',
+        );
       }
       tx.set(limitRef, {
         minuteWindowStart: minuteCount === 0 ? now : minuteStart,

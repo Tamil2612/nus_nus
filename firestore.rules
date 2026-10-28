@@ -193,14 +193,18 @@ service cloud.firestore {
             request.resource.data.addedBy == request.auth.uid;
         }
 
-        // Any group member may read expenses and add their own logged expense.
+        // Any group member may read expenses. Expense writes go through the
+        // trusted saveExpense callable below rather than direct client writes.
         allow read: if isGroupMember();
-        allow create: if accountCanWrite() && isGroupMember() && validExpense();
+        // Expense creation and financial edits go through the trusted
+        // saveExpense callable, which validates dynamic participant IDs and
+        // exact split totals before using the Admin SDK to write.
+        allow create: if false;
 
         // Existing expense identity and authorship cannot be reassigned.
         // Only the original expense logger can edit expense details. Group
         // ownership does not grant edit permission on another member's expense.
-        allow update: if accountCanWrite() && isGroupMember() && (
+        allow update: if false && accountCanWrite() && isGroupMember() && (
           (
             request.auth.uid == resource.data.addedBy &&
             request.resource.data.addedBy == resource.data.addedBy &&

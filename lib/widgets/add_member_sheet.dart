@@ -92,7 +92,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       return;
     }
 
-    // Send at most five 100-number batches, within the callable minute limit.
+    // Keep address-book matching bounded. The callable accepts up to 100
+    // numbers per request, and the server allows several requests per minute.
     final batch = phoneNumbers.take(500).toList();
     if (mounted) {
       setState(() {

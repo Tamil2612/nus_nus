@@ -198,6 +198,26 @@ test('only the expense author can toggle a participant paid/pending', async () =
   await assertFails(updateDoc(expenseRef(owner), { settledBy: ['1'] }));
 });
 
+test('clients cannot directly create or update expenses', async () => {
+  const member = env.authenticatedContext('member-a');
+  await assertFails(setDoc(expenseRef(member, 'direct-create'), {
+    desc: 'Forged',
+    amount: 10,
+    payerId: 999,
+    splitMap: { '999': 1000 },
+    isSettlement: false,
+    settledBy: ['999'],
+    settledAmounts: {},
+    addedBy: 'member-a',
+    createdAt: serverTimestamp(),
+  }));
+  await seedExpense();
+  await assertFails(updateDoc(expenseRef(member), {
+    amount: 10,
+    splitMap: { '999': 1000 },
+  }));
+});
+
 test('expense author cannot forge or erase trusted pair-settlement allocations', async () => {
   const author = env.authenticatedContext('member-a');
   await seedExpense();

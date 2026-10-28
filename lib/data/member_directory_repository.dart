@@ -4,7 +4,7 @@ import '../models/app_user.dart';
 import '../utils/phone_lookup.dart';
 
 /// Reads and updates profiles. User documents stay private; phone matching
-/// goes through the trusted, rate-limited callable.
+/// goes through the trusted callable.
 class MemberDirectoryRepository {
   MemberDirectoryRepository._();
   static final MemberDirectoryRepository instance =

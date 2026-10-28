@@ -160,21 +160,29 @@ class FirestoreRepository {
         snap.docs.map((d) => Expense.fromJson(d.id, d.data())).toList());
   }
 
-  /// Adds a brand-new expense. Any member of the group may call this —
-  /// the security rules only require that [expense.addedBy] is the
-  /// caller's own uid.
+  /// Adds a brand-new expense through the trusted backend validator. Any
+  /// current group member may call this; the callable verifies authorship,
+  /// participant IDs, and exact split totals before writing.
   Future<void> createExpense(String groupId, Expense expense) async {
     try {
-      await _expensesCol(groupId).doc(expense.id).set(expense.toJson());
+      final data = expense.toJson()..remove('createdAt');
+      await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('saveExpense')
+          .call({
+        'groupId': groupId,
+        'expenseId': expense.id,
+        'operation': 'create',
+        'expense': data,
+      });
     } catch (e, st) {
       debugPrint('FirestoreRepository.createExpense failed: $e\n$st');
       rethrow;
     }
   }
 
-  /// Overwrites an existing expense in place for edits. Firestore rules
-  /// restrict this to the original expense author and prevent client writes
-  /// from changing trusted pair-settlement allocation metadata.
+  /// Updates an existing expense through the trusted backend validator. The
+  /// callable restricts this to the original author and prevents changes to
+  /// trusted pair-settlement allocation metadata.
   Future<void> updateExpense(String groupId, Expense expense) async {
     try {
       // update() with only the editable fields, never set(): set() would
@@ -185,7 +193,14 @@ class FirestoreRepository {
         ..remove('createdAt') // immutable
         ..remove('addedBy') // immutable
         ..remove('settledAmounts'); // written only by the settlement callables
-      await _expensesCol(groupId).doc(expense.id).update(fields);
+      await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('saveExpense')
+          .call({
+        'groupId': groupId,
+        'expenseId': expense.id,
+        'operation': 'update',
+        'expense': fields,
+      });
     } catch (e, st) {
       debugPrint('FirestoreRepository.updateExpense failed: $e\n$st');
       rethrow;
@@ -196,7 +211,12 @@ class FirestoreRepository {
   Future<void> updateSettledBy(
       String groupId, String expenseId, Set<int> settledBy) async {
     try {
-      await _expensesCol(groupId).doc(expenseId).update({
+      await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('saveExpense')
+          .call({
+        'groupId': groupId,
+        'expenseId': expenseId,
+        'operation': 'toggleSettledBy',
         'settledBy': settledBy.map((e) => e.toString()).toList(),
       });
     } catch (e, st) {
