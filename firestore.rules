@@ -177,22 +177,6 @@ service cloud.firestore {
             request.auth.uid in groupData().memberUids;
         }
 
-        function validExpense() {
-          return request.resource.data.amount is number &&
-            request.resource.data.amount > 0 &&
-            request.resource.data.amount <= 100000000 &&
-            request.resource.data.desc is string &&
-            request.resource.data.desc.size() > 0 &&
-            request.resource.data.desc.size() <= 200 &&
-            request.resource.data.payerId is int &&
-            request.resource.data.splitMap is map &&
-            request.resource.data.splitMap.keys().size() > 0 &&
-            request.resource.data.settledBy is list &&
-            request.resource.data.settledAmounts is map &&
-            request.resource.data.isSettlement == false &&
-            request.resource.data.addedBy == request.auth.uid;
-        }
-
         // Any group member may read expenses. Expense writes go through the
         // trusted saveExpense callable below rather than direct client writes.
         allow read: if isGroupMember();
@@ -201,45 +185,11 @@ service cloud.firestore {
         // exact split totals before using the Admin SDK to write.
         allow create: if false;
 
-        // Existing expense identity and authorship cannot be reassigned.
-        // Only the original expense logger can edit expense details. Group
-        // ownership does not grant edit permission on another member's expense.
-        allow update: if false && accountCanWrite() && isGroupMember() && (
-          (
-            request.auth.uid == resource.data.addedBy &&
-            request.resource.data.addedBy == resource.data.addedBy &&
-            request.resource.data.payerId == resource.data.payerId &&
-            request.resource.data.isSettlement == resource.data.isSettlement &&
-            request.resource.data.createdAt == resource.data.createdAt &&
-            (request.auth.uid == resource.data.addedBy ||
-              request.resource.data.settledBy == resource.data.settledBy) &&
-            // Only the trusted callable may change pair-settlement allocations.
-            // Expense authors must not be able to erase or forge recorded settlements.
-            request.resource.data.get('settledAmounts', {}) == resource.data.get('settledAmounts', {}) &&
-            // Once any pair settlement has been allocated, changing the share
-            // amounts would invalidate that trusted reconciliation.
-            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['splitMap', 'amount']) ||
-              resource.data.get('settledAmounts', {}).size() == 0) &&
-            request.resource.data.amount is number &&
-            request.resource.data.amount > 0 &&
-            request.resource.data.amount <= 100000000 &&
-            request.resource.data.desc is string &&
-            request.resource.data.desc.size() > 0 &&
-            request.resource.data.desc.size() <= 200 &&
-            request.resource.data.splitMap is map &&
-            request.resource.data.splitMap.keys().size() > 0 &&
-            request.resource.data.settledBy is list
-          ) ||
-          // Only the original expense logger can toggle whole-share status.
-          // Pairwise partial settlements are written by the trusted callable.
-          (
-            isGroupMember() &&
-            request.auth.uid == resource.data.addedBy &&
-            request.resource.data.diff(resource.data)
-              .affectedKeys().hasOnly(['settledBy']) &&
-            request.resource.data.settledBy is list
-          )
-        );
+        // Edits and paid/pending toggles also go through saveExpense: it checks
+        // that only the original author edits, that the payer can't change, and
+        // that pair-settled shares keep their amount and split. Pair-settlement
+        // allocations are written only by the settlement callables.
+        allow update: if false;
 
         // Only the original expense logger may delete an expense, and only
         // after all pair-settlement allocations against it have been undone.

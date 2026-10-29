@@ -187,13 +187,13 @@ async function seedExpense(settledAmounts = {}) {
   });
 }
 
-test('only the expense author can toggle a participant paid/pending', async () => {
+test('nobody can toggle paid/pending directly; it goes through saveExpense', async () => {
   await seedExpense();
   const author = env.authenticatedContext('member-a');
   const otherMember = env.authenticatedContext('member-b');
   const owner = env.authenticatedContext('owner');
 
-  await assertSucceeds(updateDoc(expenseRef(author), { settledBy: ['1', '2'] }));
+  await assertFails(updateDoc(expenseRef(author), { settledBy: ['1', '2'] }));
   await assertFails(updateDoc(expenseRef(otherMember), { settledBy: ['1'] }));
   await assertFails(updateDoc(expenseRef(owner), { settledBy: ['1'] }));
 });
@@ -218,7 +218,7 @@ test('clients cannot directly create or update expenses', async () => {
   }));
 });
 
-test('expense author cannot forge or erase trusted pair-settlement allocations', async () => {
+test('expense author cannot forge or erase pair-settlement allocations or edit directly', async () => {
   const author = env.authenticatedContext('member-a');
   await seedExpense();
   await assertFails(updateDoc(expenseRef(author), { settledAmounts: { '2': 25 } }));
@@ -237,8 +237,8 @@ test('expense author cannot forge or erase trusted pair-settlement allocations',
     });
   });
   await assertFails(updateDoc(expenseRef(author, 'e2'), { settledAmounts: {}, amount: 90 }));
-  // A description-only edit is still permitted without touching settlement data.
-  await assertSucceeds(updateDoc(expenseRef(author, 'e2'), { desc: 'Dinner updated' }));
+  // Even a description-only edit is rejected here: edits go through saveExpense.
+  await assertFails(updateDoc(expenseRef(author, 'e2'), { desc: 'Dinner updated' }));
 });
 
 test('an expense with a recorded pair settlement cannot be deleted', async () => {

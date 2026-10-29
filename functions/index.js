@@ -20,6 +20,14 @@ const genAI = new GoogleGenerativeAI(apiKey);
 // Firestore instance
 const db = admin.firestore();
 const { normalizeLookupPhone } = require('./phone_lookup');
+const {
+  ExpenseValidationError,
+  normalizeExpenseInput,
+  validateExpensePeople,
+  assertInitialSettledBy,
+  normalizeSettledByUpdate,
+  assertCoveredSharesUnchanged,
+} = require('./expense_validation');
 
 // App Check enforcement for every callable. Off by default so existing builds
 // keep working; once the apps send App Check tokens (see lib/main.dart) set
@@ -305,72 +313,6 @@ exports.onGroupMessageCreated = functions.firestore
     return null;
   });
 
-function expenseError(message) {
-  throw new functions.https.HttpsError('invalid-argument', message);
-}
-
-function normalizeExpenseInput(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    expenseError('Invalid expense data.');
-  }
-  const desc = typeof raw.desc === 'string' ? raw.desc.trim() : '';
-  const amount = Number(raw.amount);
-  const payerId = Number(raw.payerId);
-  const splitMap = raw.splitMap;
-  const settledBy = raw.settledBy;
-  const isSettlement = raw.isSettlement;
-  if (!desc || desc.length > 200 || !Number.isFinite(amount) || amount <= 0 ||
-      amount > 100000000 || !Number.isSafeInteger(payerId) ||
-      !splitMap || typeof splitMap !== 'object' || Array.isArray(splitMap) ||
-      !Array.isArray(settledBy) || isSettlement !== false) {
-    expenseError('Invalid expense fields.');
-  }
-
-  const amountCents = Math.round(amount * 100);
-  if (Math.abs(amountCents / 100 - amount) > 0.005) {
-    expenseError('Expense amounts must be in whole cents.');
-  }
-  const normalizedSplits = {};
-  let splitTotalCents = 0;
-  for (const [rawId, rawShare] of Object.entries(splitMap)) {
-    const personId = String(rawId);
-    const share = Number(rawShare);
-    const shareCents = Math.round(share * 100);
-    if (!/^\d+$/.test(personId) || !Number.isFinite(share) || share < 0 ||
-        share > amount || Math.abs(shareCents / 100 - share) > 0.005) {
-      expenseError('Expense shares must be valid non-negative amounts.');
-    }
-    normalizedSplits[personId] = shareCents / 100;
-    splitTotalCents += shareCents;
-  }
-  if (Object.keys(normalizedSplits).length === 0 ||
-      splitTotalCents !== amountCents) {
-    expenseError('Expense shares must add up exactly to the expense amount.');
-  }
-
-  const normalizedSettledBy = [...new Set(settledBy.map(String))];
-  return {
-    desc,
-    amount: amountCents / 100,
-    amountCents,
-    payerId,
-    splitMap: normalizedSplits,
-    settledBy: normalizedSettledBy,
-  };
-}
-
-function validateExpensePeople(expense, group) {
-  const people = Array.isArray(group.members) ? group.members : [];
-  const personIds = new Set(people
-    .filter((person) => person && Number.isSafeInteger(Number(person.id)))
-    .map((person) => String(Number(person.id))));
-  if (!personIds.has(String(expense.payerId)) ||
-      Object.keys(expense.splitMap).some((id) => !personIds.has(id)) ||
-      expense.settledBy.some((id) => !Object.prototype.hasOwnProperty.call(expense.splitMap, id))) {
-    expenseError('The payer and every split participant must belong to this group.');
-  }
-}
-
 // Expense financial fields are validated server-side because Firestore rules
 // cannot safely sum a dynamic map of shares. Clients must use this callable;
 // Admin SDK writes bypass the client rules after all checks have passed.
@@ -403,10 +345,8 @@ exports.saveExpense = callable.https.onCall(async (data, context) => {
 
       if (operation === 'create') {
         const expense = normalizeExpenseInput(data.expense);
-        validateExpensePeople(expense, group);
-        if (expense.settledBy.some((id) => id !== String(expense.payerId))) {
-          expenseError('Only the payer may be initially marked as settled.');
-        }
+        validateExpensePeople(expense, group, { creatorUid: context.auth.uid });
+        assertInitialSettledBy(expense);
         tx.create(expenseRef, {
           desc: expense.desc,
           amount: expense.amount,
@@ -434,19 +374,15 @@ exports.saveExpense = callable.https.onCall(async (data, context) => {
       }
 
       if (operation === 'toggleSettledBy') {
-        const settledBy = data.settledBy;
-        if (!Array.isArray(settledBy)) expenseError('Invalid settlement status.');
-        const normalized = [...new Set(settledBy.map(String))];
-        const currentSplitMap = current.splitMap || {};
-        if (normalized.some((id) => !Object.prototype.hasOwnProperty.call(currentSplitMap, id))) {
-          expenseError('Only participants in the expense can be marked as settled.');
-        }
+        const normalized = normalizeSettledByUpdate(data.settledBy, current);
         tx.update(expenseRef, { settledBy: normalized });
         return { success: true };
       }
 
       const expense = normalizeExpenseInput(data.expense);
       validateExpensePeople(expense, group);
+      // An edit also writes settledBy, so it gets the same guard as a toggle.
+      assertCoveredSharesUnchanged(current, expense.settledBy);
       const currentSettledAmounts = current.settledAmounts || {};
       const hasPairSettlement = Object.values(currentSettledAmounts)
         .some((value) => Number(value) > 0.005);
@@ -470,6 +406,13 @@ exports.saveExpense = callable.https.onCall(async (data, context) => {
     });
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
+    if (error instanceof ExpenseValidationError) {
+      throw new functions.https.HttpsError(error.code, error.message);
+    }
+    // Firestore ALREADY_EXISTS: the expense was already saved (a retried create).
+    if (error && error.code === 6) {
+      throw new functions.https.HttpsError('already-exists', 'This expense was already saved.');
+    }
     console.error('saveExpense failed:', error);
     throw new functions.https.HttpsError('internal', 'Could not save the expense.');
   }
