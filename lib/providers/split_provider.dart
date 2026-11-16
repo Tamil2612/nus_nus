@@ -14,6 +14,7 @@ import '../models/group.dart';
 import '../theme/app_colors.dart';
 import '../utils/settlement_calculator.dart';
 import '../utils/currency_formatter.dart';
+import '../utils/money.dart';
 import '../services/notification_service.dart';
 
 class SplitProvider extends ChangeNotifier {
@@ -574,38 +575,44 @@ class SplitProvider extends ChangeNotifier {
     required String currency,
     Map<int, double>? customSplits,
   }) {
-    if (customSplits != null && customSplits.isNotEmpty) {
-      if (customSplits.values.any((v) => v < 0)) {
-        return "Shares can't be negative.";
+    final amountCents = MoneyUtils.toCents(amount);
+    if (amountCents == null || amountCents <= 0) {
+      return 'Enter an amount with no more than 2 decimal places.';
+    }
+
+    if (customSplits != null) {
+      if (customSplits.values.any((value) => !value.isFinite || value < 0)) {
+        return "Shares must be valid non-negative amounts.";
       }
       final known = (currentGroup?.members ?? []).map((p) => p.id).toSet();
       if (!customSplits.keys.every(known.contains)) {
         return 'Someone in this split is not in the group.';
       }
-      double sum = customSplits.values.fold(0, (a, b) => a + b);
-      if ((sum - amount).abs() > 0.01) {
-        return 'Sum of splits (${fmtCurrency(sum, currency)}) must equal total (${fmtCurrency(amount, currency)})';
+      if (customSplits.keys.toSet().length != splitWith.length ||
+          !customSplits.keys.toSet().containsAll(splitWith)) {
+        return 'Enter a share for everyone selected in the split.';
       }
-      return customSplits;
+
+      final normalized = <int, double>{};
+      var splitTotalCents = 0;
+      for (final entry in customSplits.entries) {
+        final shareCents = MoneyUtils.toCents(entry.value);
+        if (shareCents == null) {
+          return 'Each share must have no more than 2 decimal places.';
+        }
+        normalized[entry.key] = MoneyUtils.fromCents(shareCents);
+        splitTotalCents += shareCents;
+      }
+      if (splitTotalCents != amountCents) {
+        final sum = MoneyUtils.fromCents(splitTotalCents);
+        final total = MoneyUtils.fromCents(amountCents);
+        return 'Sum of splits (${fmtCurrency(sum, currency)}) must equal total (${fmtCurrency(total, currency)})';
+      }
+      return normalized;
     }
 
-    // Round each share to the cent, then hand any leftover cent(s) from
-    // rounding to the first split members so the map always sums back
-    // to exactly `amount` instead of drifting with repeating decimals.
-    final ids = splitWith.toList();
-    final baseShare = ((amount / ids.length) * 100).floor() / 100;
-    double allocated = baseShare * ids.length;
-    double remainder = (((amount - allocated) * 100).round()) / 100;
-    final map = <int, double>{};
-    for (final id in ids) {
-      double share = baseShare;
-      if (remainder > 0) {
-        share += 0.01;
-        remainder = (((remainder - 0.01) * 100).round()) / 100;
-      }
-      map[id] = share;
-    }
-    return map;
+    // Allocate integer cents, distributing remainder cents deterministically.
+    return MoneyUtils.equalSplit(amountCents, splitWith);
   }
 
   /// Returns null on success, or an error message. Any member of the
@@ -626,7 +633,9 @@ class SplitProvider extends ChangeNotifier {
     if (!group.memberUids.contains(_uid)) {
       return "You're not a member of this group.";
     }
-    if (amount == null || amount <= 0) return 'Enter a valid amount.';
+    if (amount == null || !amount.isFinite || amount <= 0) return 'Enter a valid amount.';
+    final amountCents = MoneyUtils.toCents(amount);
+    if (amountCents == null) return 'Enter an amount with no more than 2 decimal places.';
     if (payerId == null) return 'Select who paid.';
     if (splitWith.isEmpty) return 'Pick who this should be split between.';
 
@@ -656,7 +665,7 @@ class SplitProvider extends ChangeNotifier {
       desc: desc.trim().isEmpty
           ? (isSettlement ? 'Settlement' : 'Untitled expense')
           : desc.trim(),
-      amount: amount,
+      amount: MoneyUtils.fromCents(amountCents),
       payerId: payerId,
       splitMap: finalSplitMap,
       isSettlement: isSettlement,
@@ -804,7 +813,9 @@ class SplitProvider extends ChangeNotifier {
       return 'Only the person who created this split can edit it.';
     }
 
-    if (amount == null || amount <= 0) return 'Enter a valid amount.';
+    if (amount == null || !amount.isFinite || amount <= 0) return 'Enter a valid amount.';
+    final amountCents = MoneyUtils.toCents(amount);
+    if (amountCents == null) return 'Enter an amount with no more than 2 decimal places.';
     if (payerId == null) return 'Add at least one person first.';
     // Payer lock: who paid can't be reassigned after the fact, otherwise the
     // "only the payer can log a split" rule could be sidestepped by editing.
@@ -864,7 +875,7 @@ class SplitProvider extends ChangeNotifier {
 
     final updatedExpense = original.copyWith(
       desc: desc.trim().isEmpty ? original.desc : desc.trim(),
-      amount: amount,
+      amount: MoneyUtils.fromCents(amountCents),
       payerId: payerId,
       splitMap: newSplitMap,
       settledBy: newSettledBy,
