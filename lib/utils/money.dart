@@ -2,13 +2,14 @@
 class MoneyUtils {
   MoneyUtils._();
 
-  /// Converts a major-unit amount to cents, returning null for sub-cent values.
-  /// The small tolerance accepts ordinary IEEE-754 representation noise only.
+  /// Converts a major-unit amount to the nearest cent.
+  ///
+  /// Users may enter more than two decimal places; values are rounded once
+  /// when saved so backend records always use the currency's minor unit.
+  /// Returns null only for NaN or infinite values.
   static int? toCents(num amount) {
     if (!amount.isFinite) return null;
-    final cents = (amount * 100).round();
-    if ((cents / 100 - amount).abs() > 1e-6) return null;
-    return cents;
+    return (amount * 100).round();
   }
 
   static double fromCents(int cents) => cents / 100;
