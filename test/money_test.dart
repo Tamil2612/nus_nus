@@ -9,8 +9,13 @@ void main() {
       expect(MoneyUtils.toCents(1), 100);
     });
 
-    test('rejects sub-cent and non-finite amounts', () {
-      expect(MoneyUtils.toCents(12.345), isNull);
+    test('rounds user-entered precision to the nearest cent', () {
+      expect(MoneyUtils.toCents(12.345), 1235);
+      expect(MoneyUtils.toCents(12.344), 1234);
+      expect(MoneyUtils.toCents(0.1 + 0.2), 30);
+    });
+
+    test('rejects only non-finite amounts', () {
       expect(MoneyUtils.toCents(double.nan), isNull);
       expect(MoneyUtils.toCents(double.infinity), isNull);
     });

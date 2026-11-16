@@ -30,6 +30,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
   bool _isEqualSplit = true;
   final Map<int, TextEditingController> _customSplitCtrls = {};
   bool _prefilled = false;
+  String? _formError;
 
   @override
   void initState() {
@@ -69,7 +70,10 @@ class _ExpenseFormState extends State<ExpenseForm> {
   }
 
   void _onAmountChanged() {
-    setState(() {}); // Rebuild to update the sum indicator
+    if (!mounted) return;
+    setState(() {
+      _formError = null;
+    }); // Update the sum indicator and clear stale validation.
   }
 
   void _syncSelectionWith(List<Person> people, SplitProvider provider) {
@@ -144,15 +148,11 @@ class _ExpenseFormState extends State<ExpenseForm> {
           );
 
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error, style: const TextStyle(color: Colors.white)),
-          backgroundColor: AppColors.rust,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      setState(() => _formError = error);
       return;
     }
+
+    setState(() => _formError = null);
 
     if (!widget.isEditing) {
       _descCtrl.clear();
@@ -175,6 +175,31 @@ class _ExpenseFormState extends State<ExpenseForm> {
         backgroundColor: AppColors.sage,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  Widget _buildValidationError() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
+      decoration: BoxDecoration(
+        color: AppColors.rust.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(10.r),
+        border: Border.all(color: AppColors.rust.withValues(alpha: .25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, color: AppColors.rust, size: 17.r),
+          8.horizontalSpace,
+          Expanded(
+            child: Text(
+              _formError!,
+              style: TextStyle(color: AppColors.rust, fontSize: 12.sp),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -233,6 +258,10 @@ class _ExpenseFormState extends State<ExpenseForm> {
               ],
             ),
           ),
+          if (_formError != null) ...[
+            10.verticalSpace,
+            _buildValidationError(),
+          ],
           18.verticalSpace,
           SizedBox(
             width: double.infinity,
@@ -469,6 +498,10 @@ class _ExpenseFormState extends State<ExpenseForm> {
               ),
             );
           }),
+        ],
+        if (_formError != null) ...[
+          10.verticalSpace,
+          _buildValidationError(),
         ],
         20.verticalSpace,
         SizedBox(
