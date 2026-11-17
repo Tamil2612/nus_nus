@@ -205,8 +205,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                             color: AppColors.brassSoft, fontWeight: FontWeight.w900,
                             letterSpacing: 1.1, fontSize: 11.sp)),
                           10.verticalSpace,
-                          ...ExpenseCategory.all.where((category) =>
-                            (budget.categoryBudgets[category.id] ?? 0) > 0).map((category) {
+                          ...ExpenseCategory.all.map((category) {
                             final allocation = budget.categoryBudgets[category.id] ?? 0;
                             final actual = spending.byCategory[category.id] ?? 0;
                             final over = actual > allocation;
@@ -217,8 +216,10 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                                 Row(children: [
                                   Expanded(child: Text(category.label,
                                     style: const TextStyle(color: AppColors.paper))),
-                                  Text('${fmtCurrency(actual, currency)} / ${fmtCurrency(allocation, currency)}',
-                                    style: TextStyle(color: over ? AppColors.rust : AppColors.paper,
+                                  Text(allocation > 0
+                                    ? '${fmtCurrency(actual, currency)} / ${fmtCurrency(allocation, currency)}'
+                                    : '${fmtCurrency(actual, currency)} / No budget',
+                                    style: TextStyle(color: over || (allocation == 0 && actual > 0) ? AppColors.rust : AppColors.paper,
                                       fontSize: 10.sp, fontWeight: FontWeight.w700)),
                                 ]),
                                 6.verticalSpace,
