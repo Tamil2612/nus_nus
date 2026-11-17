@@ -78,7 +78,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                     if (expense.isSettlement || date == null ||
                         date.year != _month.year || date.month != _month.month) continue;
                     final amount = group.isPersonal ? expense.amount : (expense.splitMap[myId] ?? 0);
-                    final week = ((date.day - 1) ~/ 7).clamp(0, 4);
+                    final week = ((date.day - 1) ~/ 7).clamp(0, 4).toInt();
                     weekly[week] += amount;
                   }
                 }
