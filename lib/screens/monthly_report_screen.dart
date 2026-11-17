@@ -198,6 +198,38 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                         if (budget != null) _summaryCard(
                           total > budget.amount ? 'Over budget' : 'Remaining',
                           fmtCurrency((budget.amount - total).abs(), currency)),
+
+                        if (budget != null) ...[
+                          12.verticalSpace,
+                          Text('CATEGORY BUDGET VS ACTUAL', style: TextStyle(
+                            color: AppColors.brassSoft, fontWeight: FontWeight.w900,
+                            letterSpacing: 1.1, fontSize: 11.sp)),
+                          10.verticalSpace,
+                          ...ExpenseCategory.all.where((category) =>
+                            (budget.categoryBudgets[category.id] ?? 0) > 0).map((category) {
+                            final allocation = budget.categoryBudgets[category.id] ?? 0;
+                            final actual = spending.byCategory[category.id] ?? 0;
+                            final over = actual > allocation;
+                            final ratio = allocation > 0 ? (actual / allocation).clamp(0.0, 1.0) : 0.0;
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: 12.h),
+                              child: Column(children: [
+                                Row(children: [
+                                  Expanded(child: Text(category.label,
+                                    style: const TextStyle(color: AppColors.paper))),
+                                  Text('${fmtCurrency(actual, currency)} / ${fmtCurrency(allocation, currency)}',
+                                    style: TextStyle(color: over ? AppColors.rust : AppColors.paper,
+                                      fontSize: 10.sp, fontWeight: FontWeight.w700)),
+                                ]),
+                                6.verticalSpace,
+                                ClipRRect(borderRadius: BorderRadius.circular(8.r),
+                                  child: LinearProgressIndicator(value: ratio, minHeight: 6.h,
+                                    backgroundColor: Colors.white12,
+                                    color: over ? AppColors.rust : AppColors.brass)),
+                              ]),
+                            );
+                          }),
+                        ],
                       ],
                     );
                   },
