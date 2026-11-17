@@ -574,8 +574,19 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
                           context, uid, currency, null),
                         child: const Text('Set budget'),
                       )
-                    else
+                    else ...[
+                      TextButton(
+                        onPressed: () => _openBudgetSetup(
+                          context, uid, currency, budget),
+                        style: TextButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 4.h),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text('Edit', style: TextStyle(fontSize: 10.sp)),
+                      ),
                       Icon(Icons.chevron_right, color: AppColors.slate, size: 20.r),
+                    ],
                   ]),
                   if (snapshot.connectionState == ConnectionState.waiting && budget == null)
                     const LinearProgressIndicator()
