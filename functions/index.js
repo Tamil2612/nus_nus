@@ -355,6 +355,7 @@ exports.saveExpense = callable.https.onCall(async (data, context) => {
           isSettlement: false,
           settledBy: expense.settledBy,
           settledAmounts: {},
+          ...(expense.categoryId ? { categoryId: expense.categoryId } : {}),
           addedBy: context.auth.uid,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -401,6 +402,7 @@ exports.saveExpense = callable.https.onCall(async (data, context) => {
         splitMap: expense.splitMap,
         isSettlement: false,
         settledBy: expense.settledBy,
+        ...(expense.categoryId ? { categoryId: expense.categoryId } : { categoryId: admin.firestore.FieldValue.delete() }),
       });
       return { success: true };
     });
