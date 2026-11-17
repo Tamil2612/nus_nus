@@ -626,6 +626,7 @@ class SplitProvider extends ChangeNotifier {
     required int? payerId,
     required Set<int> splitWith,
     Map<int, double>? customSplits,
+    String? categoryId,
     bool isSettlement = false,
   }) {
     final group = currentGroup;
@@ -672,6 +673,7 @@ class SplitProvider extends ChangeNotifier {
       settledBy: {payerId},
       // The person who paid is already paid/settled
       addedBy: _uid,
+      categoryId: categoryId,
       // security rules require addedBy == the signed-in uid
       createdAt: DateTime.now(),
     );
@@ -801,6 +803,8 @@ class SplitProvider extends ChangeNotifier {
     required int? payerId,
     required Set<int> splitWith,
     Map<int, double>? customSplits,
+    String? categoryId,
+    bool clearCategory = false,
   }) {
     final group = currentGroup;
     if (group == null) return 'Select a group first.';
@@ -880,6 +884,8 @@ class SplitProvider extends ChangeNotifier {
       splitMap: newSplitMap,
       settledBy: newSettledBy,
       settledAmounts: newSettledAmounts,
+      categoryId: categoryId,
+      clearCategory: clearCategory,
     );
 
     final updatedExpenses = [...expenses];
