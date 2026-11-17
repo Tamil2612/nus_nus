@@ -25,12 +25,15 @@ service cloud.firestore {
           return monthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
         }
         function validBudget() {
-          return request.resource.data.keys().hasOnly(['amount', 'currency', 'updatedAt']) &&
+          return request.resource.data.keys().hasOnly(['amount', 'currency', 'categoryBudgets', 'updatedAt']) &&
             request.resource.data.amount is number &&
             request.resource.data.amount > 0 &&
             request.resource.data.amount <= 100000000 &&
             request.resource.data.currency is string &&
-            request.resource.data.currency.size() == 3;
+            request.resource.data.currency.size() == 3 &&
+            request.resource.data.categoryBudgets is map &&
+            request.resource.data.categoryBudgets.keys().hasOnly(
+              ['food','transport','shopping','rent','bills','entertainment','health','education','other']);
         }
         allow read: if isOwner() && validMonth();
         allow create, update: if isOwner() && validMonth() &&
