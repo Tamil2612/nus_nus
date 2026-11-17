@@ -21,15 +21,25 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
   Future<Map<String, String?>> _loadOverrides(SplitProvider provider) async {
     final uid = provider.uid;
     if (uid == null) return {};
-    final entries = <String, String?>{};
-    for (final group in provider.groups.where((g) => !g.isPersonal)) {
-      for (final expense in group.expenses.where((e) => e.createdAt != null && e.createdAt!.year == _month.year && e.createdAt!.month == _month.month)) {
-        final category = await MonthlyBudgetRepository.instance.getMemberCategory(
-          groupId: group.id, expenseId: expense.id, uid: uid);
-        if (category != null) entries['${group.id}/${expense.id}'] = category;
+    final groups = provider.groups.where((g) => !g.isPersonal);
+    final requests = <Future<MapEntry<String, String?>>>[];
+    for (final group in groups) {
+      for (final expense in group.expenses.where((e) =>
+          e.createdAt != null && e.createdAt!.year == _month.year &&
+          e.createdAt!.month == _month.month)) {
+        requests.add(() async {
+          try {
+            final category = await MonthlyBudgetRepository.instance.getMemberCategory(
+              groupId: group.id, expenseId: expense.id, uid: uid);
+            return MapEntry('${group.id}/${expense.id}', category);
+          } catch (_) {
+            return MapEntry('${group.id}/${expense.id}', null);
+          }
+        }());
       }
     }
-    return entries;
+    final loaded = await Future.wait(requests);
+    return {for (final entry in loaded) if (entry.value != null) entry.key: entry.value};
   }
 
   @override
@@ -50,6 +60,9 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
           : FutureBuilder<Map<String, String?>>(
               future: _loadOverrides(provider),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(child: Text('Could not load category details. Please try again.', style: TextStyle(color: AppColors.paper)));
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -85,6 +98,8 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                 final maxWeek = weekly.fold<double>(0, (a, b) => a > b ? a : b);
                     final categories = spending.byCategory.entries.toList()
                       ..sort((a,b) => b.value.compareTo(a.value));
+                    final averageDaily = total / DateTime(_month.year, _month.month + 1, 0).day;
+                    final topCategory = categories.isEmpty ? null : categories.first;
                     return ListView(
                       padding: EdgeInsets.all(18.w),
                       children: [
@@ -106,7 +121,13 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                           Expanded(child: _summaryCard('Shared share', fmtCurrency(spending.shared, currency))),
                         ]),
                         12.verticalSpace,
-                        _summaryCard('Expenses', '${spending.expenseCount}'),
+                        Row(children: [
+                          Expanded(child: _summaryCard('Expenses', '${spending.expenseCount}')),
+                          10.horizontalSpace,
+                          Expanded(child: _summaryCard('Daily average', fmtCurrency(averageDaily, currency))),
+                        ]),
+                        if (topCategory != null)
+                          _summaryCard('Highest category', ExpenseCategory.byId(topCategory.key)?.label ?? 'Uncategorized'),
 
                         20.verticalSpace,
                         Text('WEEKLY SPENDING', style: TextStyle(color: AppColors.brassSoft,
