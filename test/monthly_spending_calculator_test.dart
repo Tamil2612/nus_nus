@@ -43,10 +43,10 @@ void main() {
     expect(result.byCategory, {'food': 120});
   });
 
-  test('excludes settlements, other months and other currencies', () {
-    final group = Group(
+  test('excludes settlements and other months, and does not convert other currencies', () {
+    final aedGroup = Group(
       id: 'g1', name: 'Flatmates', ownerId: 'uid-payer',
-      members: [me, payer], currency: 'USD',
+      members: [me, payer],
       expenses: [
         Expense(id: 'settle', desc: 'Settlement', amount: 50, payerId: 2,
           splitMap: {1: 50}, isSettlement: true, createdAt: DateTime(2026, 11, 4)),
@@ -56,9 +56,17 @@ void main() {
           splitMap: {1: 20}, createdAt: DateTime(2026, 11, 4)),
       ],
     );
+    final usdGroup = Group(
+      id: 'g2', name: 'Trip', ownerId: 'uid-payer', currency: 'USD',
+      members: [me, payer],
+      expenses: [
+        Expense(id: 'usd', desc: 'USD expense', amount: 90, payerId: 2,
+          splitMap: {1: 90}, createdAt: DateTime(2026, 11, 4)),
+      ],
+    );
     final result = MonthlySpendingCalculator.calculate(
-      groups: [group], uid: 'uid-me', month: month, currency: 'AED');
-    expect(result.total, 0);
+      groups: [aedGroup, usdGroup], uid: 'uid-me', month: month, currency: 'AED');
+    expect(result.total, 20);
   });
 
   test('formats monthly budget key with leading zero', () {
