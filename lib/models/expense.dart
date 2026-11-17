@@ -18,6 +18,8 @@ class Expense {
   /// one, not just the creator, so this is what "Added by X" is built
   /// from. Null for expenses written before this field existed.
   final String? addedBy;
+  /// Optional category chosen by the expense logger; individual members may override it privately.
+  final String? categoryId;
   final DateTime? createdAt;
 
   Expense({
@@ -30,6 +32,7 @@ class Expense {
     Set<int>? settledBy,
     Map<int, double>? settledAmounts,
     this.addedBy,
+    this.categoryId,
     this.createdAt,
   }) : settledBy = settledBy ?? {},
        settledAmounts = settledAmounts ?? const {};
@@ -104,6 +107,8 @@ class Expense {
     Map<int, double>? settledAmounts,
     String? addedBy,
     DateTime? createdAt,
+    String? categoryId,
+    bool clearCategory = false,
   }) {
     return Expense(
       id: id,
@@ -115,6 +120,7 @@ class Expense {
       settledBy: settledBy ?? this.settledBy,
       settledAmounts: settledAmounts ?? this.settledAmounts,
       addedBy: addedBy ?? this.addedBy,
+      categoryId: clearCategory ? null : (categoryId ?? this.categoryId),
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -131,6 +137,7 @@ class Expense {
     'settledBy': settledBy.map((e) => e.toString()).toList(),
     'settledAmounts': settledAmounts.map((k, v) => MapEntry(k.toString(), v)),
     'addedBy': addedBy,
+    if (categoryId != null) 'categoryId': categoryId,
     'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
   };
 
@@ -149,6 +156,7 @@ class Expense {
     settledBy: _parseSettledBy(json['settledBy']),
     settledAmounts: _parseSettledAmounts(json['settledAmounts']),
     addedBy: json['addedBy'] as String?,
+    categoryId: json['categoryId'] as String?,
     createdAt: json['createdAt'] != null ? (json['createdAt'] as Timestamp).toDate() : null,
   );
 
