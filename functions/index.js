@@ -420,6 +420,62 @@ exports.saveExpense = callable.https.onCall(async (data, context) => {
   }
 });
 
+// A member may privately categorize only their own allocated share in a group expense.
+exports.setMemberExpenseCategory = callable.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in to categorize your expense.');
+  }
+  const uid = context.auth.uid;
+  await assertAccountActive(uid);
+  const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+  const expenseId = typeof data.expenseId === 'string' ? data.expenseId.trim() : '';
+  const categoryId = data.categoryId == null ? null : data.categoryId;
+  const allowed = ['food','transport','shopping','rent','bills','entertainment','health','education','other'];
+  if (!groupId || groupId.includes('/') || groupId.length > 200 ||
+      !expenseId || expenseId.includes('/') || expenseId.length > 200 ||
+      (categoryId !== null && (typeof categoryId !== 'string' || !allowed.includes(categoryId)))) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid category request.');
+  }
+  const groupRef = db.collection('groups').doc(groupId);
+  const expenseRef = groupRef.collection('expenses').doc(expenseId);
+  try {
+    await db.runTransaction(async (tx) => {
+      const groupSnap = await tx.get(groupRef);
+      const expenseSnap = await tx.get(expenseRef);
+      if (!groupSnap.exists || !expenseSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Group expense not found.');
+      }
+      const group = groupSnap.data();
+      if (!Array.isArray(group.memberUids) || !group.memberUids.includes(uid)) {
+        throw new functions.https.HttpsError('permission-denied', 'You are not a member of this group.');
+      }
+      const member = (Array.isArray(group.members) ? group.members : [])
+        .find((person) => person && person.linkedUserId === uid && person.archived !== true);
+      if (!member || !Object.prototype.hasOwnProperty.call(
+        expenseSnap.data().splitMap || {}, String(member.id))) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'You can only categorize an expense when you have an allocated share.',
+        );
+      }
+      const categoryRef = expenseRef.collection('memberCategories').doc(uid);
+      if (categoryId === null) {
+        tx.delete(categoryRef);
+      } else {
+        tx.set(categoryRef, {
+          categoryId,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('setMemberExpenseCategory failed:', error);
+    throw new functions.https.HttpsError('internal', 'Could not save your category.');
+  }
+});
+
 // Owner-only group deletion callable. The client cannot delete expenses added
 // by other members, so recursive deletion must run with Admin privileges.
 exports.deleteGroup = callable.https.onCall(async (data, context) => {
