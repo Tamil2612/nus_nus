@@ -23,7 +23,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
     if (uid == null) return {};
     final entries = <String, String?>{};
     for (final group in provider.groups.where((g) => !g.isPersonal)) {
-      for (final expense in group.expenses) {
+      for (final expense in group.expenses.where((e) => e.createdAt != null && e.createdAt!.year == _month.year && e.createdAt!.month == _month.month)) {
         final category = await MonthlyBudgetRepository.instance.getMemberCategory(
           groupId: group.id, expenseId: expense.id, uid: uid);
         if (category != null) entries['${group.id}/${expense.id}'] = category;
@@ -66,6 +66,23 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                   builder: (context, budgetSnapshot) {
                     final budget = budgetSnapshot.data;
                     final total = spending.total;
+
+                final weekly = List<double>.filled(5, 0);
+                for (final group in provider.groups) {
+                  if (group.currency.toUpperCase() != currency.toUpperCase()) continue;
+                  final mine = group.members.where((p) => p.linkedUserId == uid).toList();
+                  final myId = mine.isNotEmpty ? mine.first.id : (group.isPersonal ? 1 : null);
+                  if (myId == null) continue;
+                  for (final expense in group.expenses) {
+                    final date = expense.createdAt;
+                    if (expense.isSettlement || date == null ||
+                        date.year != _month.year || date.month != _month.month) continue;
+                    final amount = group.isPersonal ? expense.amount : (expense.splitMap[myId] ?? 0);
+                    final week = ((date.day - 1) ~/ 7).clamp(0, 4);
+                    weekly[week] += amount;
+                  }
+                }
+                final maxWeek = weekly.fold<double>(0, (a, b) => a > b ? a : b);
                     final categories = spending.byCategory.entries.toList()
                       ..sort((a,b) => b.value.compareTo(a.value));
                     return ListView(
@@ -90,6 +107,40 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                         ]),
                         12.verticalSpace,
                         _summaryCard('Expenses', '${spending.expenseCount}'),
+
+                        20.verticalSpace,
+                        Text('WEEKLY SPENDING', style: TextStyle(color: AppColors.brassSoft,
+                          fontWeight: FontWeight.w900, letterSpacing: 1.2, fontSize: 11.sp)),
+                        12.verticalSpace,
+                        Container(
+                          padding: EdgeInsets.all(14.w),
+                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: .07),
+                            borderRadius: BorderRadius.circular(15.r)),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: List.generate(5, (index) => Expanded(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 4.w),
+                                child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                                  Text(fmtCurrency(weekly[index], currency),
+                                    style: TextStyle(color: AppColors.slate, fontSize: 8.sp)),
+                                  6.verticalSpace,
+                                  Container(height: maxWeek == 0 ? 4.h : (90 * weekly[index] / maxWeek).clamp(4, 90).h,
+                                    decoration: BoxDecoration(color: AppColors.brass,
+                                      borderRadius: BorderRadius.circular(6.r))),
+                                  6.verticalSpace,
+                                  Text('W${index + 1}', style: TextStyle(color: AppColors.paper, fontSize: 9.sp)),
+                                ]),
+                              ),
+                            )),
+                          ),
+                        ),
+                        if (provider.groups.any((g) => g.currency.toUpperCase() != currency.toUpperCase()))
+                          Padding(
+                            padding: EdgeInsets.only(top: 12.h),
+                            child: Text('Groups using a different currency are excluded from this report. Currency conversion is not enabled yet.',
+                              style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
+                          ),
                         20.verticalSpace,
                         Text('CATEGORY BREAKDOWN', style: TextStyle(color: AppColors.brassSoft,
                           fontWeight: FontWeight.w900, letterSpacing: 1.2, fontSize: 11.sp)),
