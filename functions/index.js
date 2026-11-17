@@ -451,8 +451,8 @@ exports.setMemberExpenseCategory = callable.https.onCall(async (data, context) =
       }
       const member = (Array.isArray(group.members) ? group.members : [])
         .find((person) => person && person.linkedUserId === uid && person.archived !== true);
-      if (!member || !Object.prototype.hasOwnProperty.call(
-        expenseSnap.data().splitMap || {}, String(member.id))) {
+      const myShare = Number(((expenseSnap.data().splitMap || {})[String(member && member.id)]) || 0);
+      if (!member || !Number.isFinite(myShare) || myShare <= 0.005) {
         throw new functions.https.HttpsError(
           'permission-denied',
           'You can only categorize an expense when you have an allocated share.',
