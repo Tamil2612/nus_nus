@@ -613,8 +613,7 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
                   style: TextStyle(color: color, fontSize: 10.5.sp,
                     fontWeight: FontWeight.w800)),
                 14.verticalSpace,
-                ...ExpenseCategory.all.where((category) =>
-                    (budget.categoryBudgets[category.id] ?? 0) > 0).map((category) {
+                ...ExpenseCategory.all.map((category) {
                   final allocation = budget.categoryBudgets[category.id] ?? 0;
                   final actual = spending.byCategory[category.id] ?? 0;
                   final ratio = allocation > 0
@@ -630,8 +629,10 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
                         Expanded(child: Text(category.label,
                           style: TextStyle(color: AppColors.ink,
                             fontSize: 11.sp, fontWeight: FontWeight.w700))),
-                        Text('${fmtCurrency(actual, currency)} / ${fmtCurrency(allocation, currency)}',
-                          style: TextStyle(color: over ? AppColors.rust : AppColors.slate,
+                        Text(allocation > 0
+                            ? '${fmtCurrency(actual, currency)} / ${fmtCurrency(allocation, currency)}'
+                            : '${fmtCurrency(actual, currency)} / No budget',
+                          style: TextStyle(color: over || (allocation == 0 && actual > 0) ? AppColors.rust : AppColors.slate,
                             fontSize: 9.5.sp, fontWeight: FontWeight.w700)),
                       ]),
                       5.verticalSpace,
