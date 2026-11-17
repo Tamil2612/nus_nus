@@ -248,7 +248,7 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
                 8.verticalSpace,
                 ClipRRect(borderRadius: BorderRadius.circular(8.r),
                   child: LinearProgressIndicator(
-                    value: total <= 0 ? 0 : (allocated / total / 100).clamp(0.0, 1.0),
+                    value: total <= 0 ? 0 : (allocated / total).clamp(0.0, 1.0),
                     minHeight: 7.h, backgroundColor: Colors.white12,
                     color: difference == 0 ? AppColors.sage : AppColors.brass)),
                 7.verticalSpace,
