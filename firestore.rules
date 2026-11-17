@@ -21,7 +21,28 @@ service cloud.firestore {
         resource.data.get('accountDeletionInProgress', false) != true;
 
       match /budgets/{monthId} {
-        function validMonth() { return monthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])
+        function validMonth() {
+          return monthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
+        }
+        function validBudget() {
+          return request.resource.data.keys().hasOnly(['amount', 'currency', 'updatedAt']) &&
+            request.resource.data.amount is number &&
+            request.resource.data.amount > 0 &&
+            request.resource.data.amount <= 100000000 &&
+            request.resource.data.currency is string &&
+            request.resource.data.currency.size() == 3;
+        }
+        allow read: if isOwner() && validMonth();
+        allow create, update: if isOwner() && validMonth() &&
+          get(/databases/$(database)/documents/users/$(uid)).data
+            .get('accountDeletionInProgress', false) != true &&
+          validBudget();
+        allow delete: if isOwner() && validMonth() &&
+          get(/databases/$(database)/documents/users/$(uid)).data
+            .get('accountDeletionInProgress', false) != true;
+      }
+
+      match /private/{document=**} {
         allow read: if isOwner();
         allow write: if isOwner() &&
           get(/databases/$(database)/documents/users/$(uid)).data
