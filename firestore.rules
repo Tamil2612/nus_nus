@@ -227,29 +227,7 @@ service cloud.firestore {
             get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
         }
         allow read: if request.auth != null && request.auth.uid == uid && canReadExpense();
-        allow create, update: if accountCanWrite() && request.auth != null &&
-          request.auth.uid == uid && canReadExpense() &&
-          request.resource.data.keys().hasOnly(['categoryId', 'updatedAt']) &&
-          request.resource.data.categoryId is string &&
-          request.resource.data.categoryId in ['food','transport','shopping','rent','bills','entertainment','health','education','other'];
-        allow delete: if accountCanWrite() && request.auth != null && request.auth.uid == uid && canReadExpense();
-      }
-
-      // Personal category overrides are private to the member who owns the document.
-      match /expenses/{expenseId}/memberCategories/{uid} {
-        function canReadExpense() {
-          return request.auth != null && request.auth.uid in
-            get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
-        }
-        allow read: if request.auth != null && request.auth.uid == uid && canReadExpense();
-        allow create, update: if accountCanWrite() && request.auth != null &&
-          request.auth.uid == uid && canReadExpense() &&
-          request.resource.data.keys().hasOnly(['categoryId', 'updatedAt']) &&
-          request.resource.data.categoryId is string &&
-          request.resource.data.categoryId in
-            ['food','transport','shopping','rent','bills','entertainment','health','education','other'];
-        allow delete: if accountCanWrite() && request.auth != null &&
-          request.auth.uid == uid && canReadExpense();
+        allow create, update, delete: if false;
       }
 
       // Settlement audit entries are written only by trusted Admin SDK callables.
