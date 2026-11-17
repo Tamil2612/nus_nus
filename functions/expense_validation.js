@@ -31,10 +31,13 @@ function normalizeExpenseInput(raw) {
   const splitMap = raw.splitMap;
   const settledBy = raw.settledBy;
   const isSettlement = raw.isSettlement;
+  const categoryId = raw.categoryId == null ? null : raw.categoryId;
   if (!desc || desc.length > 200 || !Number.isFinite(amount) || amount <= 0 ||
       amount > 100000000 || !Number.isSafeInteger(payerId) ||
       !splitMap || typeof splitMap !== 'object' || Array.isArray(splitMap) ||
-      !Array.isArray(settledBy) || isSettlement !== false) {
+      !Array.isArray(settledBy) || isSettlement !== false ||
+      (categoryId !== null && (typeof categoryId !== 'string' ||
+        !['food','transport','shopping','rent','bills','entertainment','health','education','other'].includes(categoryId)))) {
     fail('Invalid expense fields.');
   }
 
@@ -67,6 +70,7 @@ function normalizeExpenseInput(raw) {
     payerId,
     splitMap: normalizedSplits,
     settledBy: [...new Set(settledBy.map(String))],
+    categoryId,
   };
 }
 

@@ -190,3 +190,12 @@ test('after the settlement is undone the share can be toggled again', () => {
   const afterUndo = settled({}); // settledAmounts restored to nothing
   assert.deepEqual(normalizeSettledByUpdate([1, 2], afterUndo), ['1', '2']);
 });
+test('accepts a predefined expense category', () => {
+  const result = normalizeExpenseInput(base({ categoryId: 'food' }));
+  assert.equal(result.categoryId, 'food');
+});
+
+test('rejects unknown or malformed expense categories', () => {
+  throwsValidation(() => normalizeExpenseInput(base({ categoryId: 'luxury' })));
+  throwsValidation(() => normalizeExpenseInput(base({ categoryId: 42 })));
+});

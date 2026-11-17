@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../models/expense.dart';
+import '../models/expense_category.dart';
+import '../data/monthly_budget_repository.dart';
 import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
@@ -95,6 +97,8 @@ class ExpenseDetailScreen extends StatelessWidget {
     final liveExpense = live;
 
     final payer = provider.personById(liveExpense.payerId);
+    final myGroupMembers = provider.currentGroup!.members
+        .where((p) => p.linkedUserId == provider.uid).toList();
     final splitParticipants = liveExpense.splitWith
         .map((id) => provider.personById(id))
         .where((p) => p != null)
@@ -310,6 +314,81 @@ class ExpenseDetailScreen extends StatelessWidget {
                     ),
 
                     24.verticalSpace,
+
+
+                    if (!provider.currentGroup!.isPersonal &&
+                        myGroupMembers.isNotEmpty &&
+                        liveExpense.splitMap.containsKey(myGroupMembers.first.id)) ...[
+                      FutureBuilder<String?>(
+                        future: MonthlyBudgetRepository.instance.getMemberCategory(
+                          groupId: provider.currentGroup!.id,
+                          expenseId: liveExpense.id,
+                          uid: provider.uid!,
+                        ),
+                        builder: (context, snapshot) {
+                          final selected = snapshot.data ?? liveExpense.categoryId;
+                          return Container(
+                            margin: EdgeInsets.only(bottom: 18.h),
+                            padding: EdgeInsets.all(14.w),
+                            decoration: BoxDecoration(
+                              color: AppColors.paper,
+                              borderRadius: BorderRadius.circular(16.r),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('MY CATEGORY',
+                                  style: TextStyle(color: AppColors.slate,
+                                    fontSize: 10.sp, fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.1)),
+                                8.verticalSpace,
+                                DropdownButtonFormField<String?>(
+                                  value: selected,
+                                  isExpanded: true,
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                    hintText: 'Use expense category / Uncategorized',
+                                  ),
+                                  items: [
+                                    const DropdownMenuItem<String?>(
+                                      value: null, child: Text('Use original category'),
+                                    ),
+                                    ...ExpenseCategory.all.map((category) =>
+                                      DropdownMenuItem<String?>(
+                                        value: category.id,
+                                        child: Text('${category.label}'),
+                                      )),
+                                  ],
+                                  onChanged: snapshot.connectionState == ConnectionState.waiting
+                                      ? null
+                                      : (value) async {
+                                          try {
+                                            await MonthlyBudgetRepository.instance.setMemberCategory(
+                                              groupId: provider.currentGroup!.id,
+                                              expenseId: liveExpense.id,
+                                              uid: provider.uid!,
+                                              categoryId: value == liveExpense.categoryId ? null : value,
+                                            );
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Your category was saved.')),
+                                            );
+                                          } catch (_) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Could not save your category.')),
+                                            );
+                                          }
+                                        },
+                                ),
+                                5.verticalSpace,
+                                Text('Only you see this category. It does not change the group expense.',
+                                  style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
 
                     // Breakdown Title
                     Row(
