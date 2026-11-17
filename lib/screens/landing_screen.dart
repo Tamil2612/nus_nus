@@ -540,6 +540,8 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
         final limit = budget?.amount ?? 0;
         final progress = limit > 0 ? (spent / limit).clamp(0.0, 1.0) : 0.0;
         final exceeded = limit > 0 && spent > limit;
+        final reached = limit > 0 && spent >= limit;
+        final approaching = limit > 0 && spent >= limit * .8;
         final color = exceeded ? AppColors.rust : AppColors.brass;
         return Container(
           padding: EdgeInsets.all(16.w),
