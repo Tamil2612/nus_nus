@@ -495,9 +495,7 @@ class _MonthlyBudgetCard extends StatefulWidget {
 }
 
 class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
-  bool _saving = false;
-
-  Future<void> _editBudget(
+  Future<void> _openBudgetSetup(
     BuildContext context,
     String uid,
     String currency,
@@ -512,12 +510,13 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
         ),
       ),
     );
-    if (saved == true && mounted) {
-      setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Monthly category budget saved.')),
-      );
-    }
+    if (saved == true && mounted) setState(() {});
+  }
+
+  void _openReport(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MonthlyReportScreen()),
+    );
   }
 
   @override
@@ -542,96 +541,80 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
         final spent = spending.total;
         final progress = limit > 0 ? (spent / limit).clamp(0.0, 1.0) : 0.0;
         final exceeded = limit > 0 && spent > limit;
+        final remaining = limit - spent;
         final color = exceeded ? AppColors.rust : AppColors.brass;
-        return Container(
-          padding: EdgeInsets.all(16.w),
-          decoration: BoxDecoration(
-            color: AppColors.paper,
-            borderRadius: BorderRadius.circular(19.r),
-            border: Border.all(color: AppColors.brass.withValues(alpha: .35)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Expanded(child: Text('MONTHLY CATEGORY BUDGET',
-                  style: TextStyle(color: AppColors.slate, fontSize: 10.sp,
-                    fontWeight: FontWeight.w900, letterSpacing: 1.1))),
-                TextButton.icon(
-                  onPressed: _saving ? null : () => _editBudget(
-                    context, uid, currency, budget),
-                  icon: _saving
-                      ? SizedBox(width: 14.r, height: 14.r,
-                          child: const CircularProgressIndicator(strokeWidth: 2))
-                      : Icon(Icons.edit_outlined, size: 14.r),
-                  label: Text(budget == null ? 'Set budget' : 'Edit',
-                    style: TextStyle(fontSize: 10.sp)),
-                ),
-              ]),
-              if (snapshot.hasError)
-                Text('Unable to load this month’s budget.',
-                  style: TextStyle(color: AppColors.rust, fontSize: 11.sp))
-              else if (snapshot.connectionState == ConnectionState.waiting && budget == null)
-                const LinearProgressIndicator()
-              else if (budget == null)
-                Text('Set a total and allocate it across categories.',
-                  style: TextStyle(color: AppColors.slate, fontSize: 12.sp))
-              else ...[
-                Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Expanded(child: Text(fmtCurrency(spent, currency),
-                    style: TextStyle(color: AppColors.ink, fontSize: 24.sp,
-                      fontWeight: FontWeight.w900, fontFamily: 'Georgia'))),
-                  Text('of ${fmtCurrency(limit, currency)}',
-                    style: TextStyle(color: AppColors.slate, fontSize: 11.sp)),
-                ]),
-                8.verticalSpace,
-                ClipRRect(borderRadius: BorderRadius.circular(8.r),
-                  child: LinearProgressIndicator(value: progress, minHeight: 8.h,
-                    backgroundColor: AppColors.paperDim, color: color)),
-                7.verticalSpace,
-                Text(exceeded
-                    ? '${fmtCurrency(spent - limit, currency)} over total budget'
-                    : '${fmtCurrency(limit - spent, currency)} remaining',
-                  style: TextStyle(color: color, fontSize: 10.5.sp,
-                    fontWeight: FontWeight.w800)),
-                14.verticalSpace,
-                ...ExpenseCategory.all.map((category) {
-                  final allocation = budget.categoryBudgets[category.id] ?? 0;
-                  final actual = spending.byCategory[category.id] ?? 0;
-                  final ratio = allocation > 0
-                      ? (actual / allocation).clamp(0.0, 1.0)
-                      : 0.0;
-                  final over = actual > allocation;
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: 11.h),
-                    child: Column(children: [
-                      Row(children: [
-                        Icon(category.icon, size: 15.r, color: AppColors.slate),
-                        7.horizontalSpace,
-                        Expanded(child: Text(category.label,
-                          style: TextStyle(color: AppColors.ink,
-                            fontSize: 11.sp, fontWeight: FontWeight.w700))),
-                        Text(allocation > 0
-                            ? '${fmtCurrency(actual, currency)} / ${fmtCurrency(allocation, currency)}'
-                            : '${fmtCurrency(actual, currency)} / No budget',
-                          style: TextStyle(color: over || (allocation == 0 && actual > 0) ? AppColors.rust : AppColors.slate,
-                            fontSize: 9.5.sp, fontWeight: FontWeight.w700)),
-                      ]),
-                      5.verticalSpace,
-                      ClipRRect(borderRadius: BorderRadius.circular(6.r),
-                        child: LinearProgressIndicator(value: ratio, minHeight: 5.h,
-                          backgroundColor: AppColors.paperDim,
-                          color: over ? AppColors.rust : AppColors.brass)),
+        return Material(
+          color: AppColors.paper,
+          borderRadius: BorderRadius.circular(17.r),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(17.r),
+            onTap: () => _openReport(context),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 15.w, vertical: 12.h),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(17.r),
+                border: Border.all(color: AppColors.brass.withValues(alpha: .3)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    Icon(Icons.account_balance_wallet_outlined,
+                      color: AppColors.brass, size: 19.r),
+                    9.horizontalSpace,
+                    Expanded(child: Text('MONTHLY BUDGET',
+                      style: TextStyle(color: AppColors.slate, fontSize: 10.sp,
+                        fontWeight: FontWeight.w900, letterSpacing: 1.05))),
+                    if (snapshot.hasError)
+                      Text('Unavailable', style: TextStyle(
+                        color: AppColors.rust, fontSize: 10.sp))
+                    else if (budget == null)
+                      TextButton(
+                        onPressed: () => _openBudgetSetup(
+                          context, uid, currency, null),
+                        child: const Text('Set budget'),
+                      )
+                    else
+                      Icon(Icons.chevron_right, color: AppColors.slate, size: 20.r),
+                  ]),
+                  if (snapshot.connectionState == ConnectionState.waiting && budget == null)
+                    const LinearProgressIndicator()
+                  else if (budget != null) ...[
+                    5.verticalSpace,
+                    Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Expanded(child: Text(fmtCurrency(spent, currency),
+                        style: TextStyle(color: AppColors.ink, fontSize: 21.sp,
+                          fontWeight: FontWeight.w900, fontFamily: 'Georgia'))),
+                      Text('of ${fmtCurrency(limit, currency)}',
+                        style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
                     ]),
-                  );
-                }),
-                if ((spending.byCategory['uncategorized'] ?? 0) > 0)
-                  Text('Uncategorized: ${fmtCurrency(spending.byCategory['uncategorized']!, currency)}',
-                    style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
-                Text('Shared spending counts your assigned share, even when another member paid.',
-                  style: TextStyle(color: AppColors.slate, fontSize: 9.sp)),
-              ],
-            ],
+                    8.verticalSpace,
+                    ClipRRect(borderRadius: BorderRadius.circular(8.r),
+                      child: LinearProgressIndicator(value: progress, minHeight: 6.h,
+                        backgroundColor: AppColors.paperDim, color: color)),
+                    6.verticalSpace,
+                    Row(children: [
+                      Expanded(child: Text(exceeded
+                        ? '${fmtCurrency(-remaining, currency)} over budget'
+                        : '${fmtCurrency(remaining, currency)} remaining',
+                        style: TextStyle(color: color, fontSize: 10.sp,
+                          fontWeight: FontWeight.w800))),
+                      Text('View details',
+                        style: TextStyle(color: AppColors.slate, fontSize: 10.sp,
+                          fontWeight: FontWeight.w700)),
+                    ]),
+                  ] else if (!snapshot.hasError)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: 3.h),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Set a monthly limit and category allocations',
+                          style: TextStyle(color: AppColors.slate, fontSize: 11.sp)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
         );
       },
