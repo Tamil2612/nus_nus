@@ -97,6 +97,8 @@ class ExpenseDetailScreen extends StatelessWidget {
     final liveExpense = live;
 
     final payer = provider.personById(liveExpense.payerId);
+    final myGroupMembers = provider.currentGroup!.members
+        .where((p) => p.linkedUserId == provider.uid).toList();
     final splitParticipants = liveExpense.splitWith
         .map((id) => provider.personById(id))
         .where((p) => p != null)
@@ -315,10 +317,8 @@ class ExpenseDetailScreen extends StatelessWidget {
 
 
                     if (!provider.currentGroup!.isPersonal &&
-                        liveExpense.splitMap.containsKey(
-                            provider.currentGroup!.members
-                                .where((p) => p.linkedUserId == provider.uid)
-                                .firstOrNull?.id)) ...[
+                        myGroupMembers.isNotEmpty &&
+                        liveExpense.splitMap.containsKey(myGroupMembers.first.id)) ...[
                       FutureBuilder<String?>(
                         future: MonthlyBudgetRepository.instance.getMemberCategory(
                           groupId: provider.currentGroup!.id,
