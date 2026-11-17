@@ -19,6 +19,7 @@ import '../models/expense_category.dart';
 import '../data/monthly_budget_repository.dart';
 import '../services/monthly_spending_calculator.dart';
 import 'monthly_report_screen.dart';
+import 'budget_setup_screen.dart';
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
@@ -499,42 +500,23 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
   Future<void> _editBudget(
     BuildContext context,
     String uid,
-    String monthId,
     String currency,
     MonthlyBudget? current,
   ) async {
-    final result = await showDialog<_BudgetEditorResult>(
-      context: context,
-      builder: (_) => _BudgetEditorDialog(
-        currency: currency,
-        initialTotal: current?.amount,
-        initialAllocations: current?.categoryBudgets ?? const {},
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => BudgetSetupScreen(
+          uid: uid,
+          currency: currency,
+          initialBudget: current,
+        ),
       ),
     );
-    if (result == null || !mounted) return;
-    setState(() => _saving = true);
-    try {
-      await MonthlyBudgetRepository.instance.saveBudget(
-        uid: uid,
-        monthId: monthId,
-        amount: result.total,
-        currency: currency,
-        categoryBudgets: result.allocations,
+    if (saved == true && mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Monthly category budget saved.')),
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Monthly category budget saved.')),
-        );
-        setState(() {});
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save budget: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -577,7 +559,7 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
                     fontWeight: FontWeight.w900, letterSpacing: 1.1))),
                 TextButton.icon(
                   onPressed: _saving ? null : () => _editBudget(
-                    context, uid, monthId, currency, budget),
+                    context, uid, currency, budget),
                   icon: _saving
                       ? SizedBox(width: 14.r, height: 14.r,
                           child: const CircularProgressIndicator(strokeWidth: 2))
@@ -653,156 +635,6 @@ class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
           ),
         );
       },
-    );
-  }
-}
-
-class _BudgetEditorResult {
-  final double total;
-  final Map<String, double> allocations;
-  const _BudgetEditorResult(this.total, this.allocations);
-}
-
-class _BudgetEditorDialog extends StatefulWidget {
-  final String currency;
-  final double? initialTotal;
-  final Map<String, double> initialAllocations;
-
-  const _BudgetEditorDialog({
-    required this.currency,
-    required this.initialTotal,
-    required this.initialAllocations,
-  });
-
-  @override
-  State<_BudgetEditorDialog> createState() => _BudgetEditorDialogState();
-}
-
-class _BudgetEditorDialogState extends State<_BudgetEditorDialog> {
-  late final TextEditingController _totalController;
-  late final Map<String, TextEditingController> _categoryControllers;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _totalController = TextEditingController(
-      text: widget.initialTotal?.toStringAsFixed(2) ?? '',
-    );
-    _categoryControllers = {
-      for (final category in ExpenseCategory.all)
-        category.id: TextEditingController(
-          text: widget.initialAllocations[category.id]?.toStringAsFixed(2) ?? '',
-        ),
-    };
-  }
-
-  @override
-  void dispose() {
-    _totalController.dispose();
-    for (final controller in _categoryControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  void _save() {
-    final total = double.tryParse(_totalController.text.trim());
-    if (total == null || !total.isFinite || total <= 0) {
-      setState(() => _error = 'Enter a valid total monthly budget.');
-      return;
-    }
-    final allocations = <String, double>{};
-    var cents = 0;
-    for (final category in ExpenseCategory.all) {
-      final raw = _categoryControllers[category.id]!.text.trim();
-      final amount = raw.isEmpty ? 0 : double.tryParse(raw);
-      if (amount == null || !amount.isFinite || amount < 0) {
-        setState(() => _error = 'Enter valid amounts for every category.');
-        return;
-      }
-      final categoryCents = (amount * 100).round();
-      cents += categoryCents;
-      if (categoryCents > 0) allocations[category.id] = categoryCents / 100;
-    }
-    if (cents != (total * 100).round()) {
-      setState(() => _error =
-        'Category allocations must add up to ${widget.currency} ${total.toStringAsFixed(2)}.');
-      return;
-    }
-    Navigator.of(context).pop(_BudgetEditorResult(total, allocations));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final allocated = _categoryControllers.values.fold<double>(
-      0, (sum, controller) => sum + (double.tryParse(controller.text.trim()) ?? 0),
-    );
-    final total = double.tryParse(_totalController.text.trim()) ?? 0;
-    final difference = total - allocated;
-    return AlertDialog(
-      title: const Text('Set category budgets'),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _totalController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'Total monthly budget (${widget.currency})',
-                ),
-                onChanged: (_) => setState(() => _error = null),
-              ),
-              14.verticalSpace,
-              const Text('Allocate the total across categories. Leave unused categories at 0.'),
-              10.verticalSpace,
-              ...ExpenseCategory.all.map((category) => Padding(
-                padding: EdgeInsets.only(bottom: 8.h),
-                child: Row(children: [
-                  Icon(category.icon, size: 18.r, color: AppColors.slate),
-                  9.horizontalSpace,
-                  Expanded(child: Text(category.label,
-                    style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w600))),
-                  SizedBox(
-                    width: 118.w,
-                    child: TextField(
-                      controller: _categoryControllers[category.id],
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      textAlign: TextAlign.end,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        hintText: '0.00',
-                        suffixText: widget.currency,
-                      ),
-                      onChanged: (_) => setState(() => _error = null),
-                    ),
-                  ),
-                ]),
-              )),
-              8.verticalSpace,
-              Text('Allocated: ${allocated.toStringAsFixed(2)} / ${total.toStringAsFixed(2)} ${widget.currency}',
-                style: TextStyle(
-                  fontSize: 11.sp,
-                  fontWeight: FontWeight.w800,
-                  color: (difference.abs() < .005) ? AppColors.sage : AppColors.rust,
-                )),
-              if (_error != null) ...[
-                8.verticalSpace,
-                Text(_error!, style: TextStyle(color: AppColors.rust, fontSize: 11.sp)),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel')),
-        FilledButton(onPressed: _save, child: const Text('Save budget')),
-      ],
     );
   }
 }
