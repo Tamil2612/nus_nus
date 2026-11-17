@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../models/monthly_budget.dart';
 
 class MonthlyBudgetRepository {
@@ -55,17 +56,12 @@ class MonthlyBudgetRepository {
     if (FirebaseAuth.instance.currentUser?.uid != uid) {
       throw StateError('You can only update your own category.');
     }
-    final ref = FirebaseFirestore.instance
-        .collection('groups').doc(groupId)
-        .collection('expenses').doc(expenseId)
-        .collection('memberCategories').doc(uid);
-    if (categoryId == null) {
-      await ref.delete();
-    } else {
-      await ref.set({
-        'categoryId': categoryId,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('setMemberExpenseCategory');
+    await callable.call({
+      'groupId': groupId,
+      'expenseId': expenseId,
+      'categoryId': categoryId,
+    });
   }
 }
