@@ -124,9 +124,14 @@ async function sendExpenseNotifications({ db, messaging, fieldValue, groupId, ex
     if (!doc.exists) return;
     const uid = uids[i];
     const data = doc.data() || {};
-    const tokens = (Array.isArray(data.tokens) ? data.tokens : []).filter(
-      (t) => typeof t === 'string' && t.length > 0
-    );
+    // Older registrations could leave the same token in the array more than
+    // once. A push is per device, so duplicate entries must not become
+    // duplicate notifications.
+    const tokens = [...new Set(
+      (Array.isArray(data.tokens) ? data.tokens : []).filter(
+        (t) => typeof t === 'string' && t.length > 0
+      )
+    )];
     const body = `${who} paid for "${what}" — your share is ${formatMoney(shares.get(uid), group.currency)}.`;
     tokens.forEach((token) => {
       messages.push(buildMessage({ token, title, body, groupId, expenseId }));

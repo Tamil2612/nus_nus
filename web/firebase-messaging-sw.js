@@ -12,18 +12,11 @@ firebase.initializeApp({
   measurementId: 'G-3EMVG071P9',
 });
 
-const messaging = firebase.messaging();
+firebase.messaging();
 
-messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || 'Nus·Nus';
-  const options = {
-    body: payload.notification?.body || '',
-    icon: '/icons/Icon-192.png',
-    data: payload.data || {},
-  };
-
-  return self.registration.showNotification(title, options);
-});
+// FCM automatically displays messages that contain a `notification` payload
+// while the web app is in the background. Do not call showNotification here as
+// well, or every push is displayed twice.
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
