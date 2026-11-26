@@ -57,9 +57,11 @@ class MonthlySpendingCalculator {
         }
         count++;
         final overrideKey = '${group.id}/${expense.id}';
-        final category = memberCategories.containsKey(overrideKey)
-            ? memberCategories[overrideKey]
-            : expense.categoryId;
+        // Shared expenses use only this member's private tag. The shared
+        // expense category is not used in personal reports.
+        final category = group.isPersonal
+            ? expense.categoryId
+            : memberCategories[overrideKey];
         final categoryKey = category ?? 'uncategorized';
         categories[categoryKey] = (categories[categoryKey] ?? 0) + amount;
       }
