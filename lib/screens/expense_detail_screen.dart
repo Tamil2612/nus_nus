@@ -58,6 +58,26 @@ class ExpenseDetailScreen extends StatelessWidget {
     }
   }
 
+  Widget _buildCategoryTile({required String label, required IconData icon, required bool selected, required VoidCallback onTap}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14.r),
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? AppColors.brass.withValues(alpha: 0.15) : AppColors.paperDim.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(14.r),
+          border: Border.all(color: selected ? AppColors.brass : AppColors.ink.withValues(alpha: 0.08), width: selected ? 1.6 : 1),
+        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: selected ? AppColors.brass : AppColors.ink, size: 24.r),
+          8.verticalSpace,
+          Text(label, textAlign: TextAlign.center, style: TextStyle(color: AppColors.ink, fontSize: 10.sp, fontWeight: FontWeight.w800)),
+          if (selected) ...[4.verticalSpace, Icon(Icons.check_circle_rounded, color: AppColors.brass, size: 14.r)],
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
@@ -326,65 +346,100 @@ class ExpenseDetailScreen extends StatelessWidget {
                           uid: provider.uid!,
                         ),
                         builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Container(
+                              margin: EdgeInsets.only(bottom: 18.h),
+                              padding: EdgeInsets.all(16.w),
+                              decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(18.r)),
+                              child: Row(children: [
+                                const CircularProgressIndicator(strokeWidth: 2, color: AppColors.brass),
+                                12.horizontalSpace,
+                                Text('Loading your category...', style: TextStyle(color: AppColors.slate, fontSize: 12.sp)),
+                              ]),
+                            );
+                          }
                           final selected = snapshot.data ?? liveExpense.categoryId;
+                          final selectedCategory = ExpenseCategory.byId(selected);
+                          final messenger = ScaffoldMessenger.of(context);
                           return Container(
                             margin: EdgeInsets.only(bottom: 18.h),
-                            padding: EdgeInsets.all(14.w),
-                            decoration: BoxDecoration(
-                              color: AppColors.paper,
-                              borderRadius: BorderRadius.circular(16.r),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('MY CATEGORY',
-                                  style: TextStyle(color: AppColors.slate,
-                                    fontSize: 10.sp, fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.1)),
-                                8.verticalSpace,
-                                DropdownButtonFormField<String?>(
-                                  value: selected,
-                                  isExpanded: true,
-                                  decoration: const InputDecoration(
-                                    isDense: true,
-                                    border: OutlineInputBorder(),
-                                    hintText: 'Use expense category / Uncategorized',
-                                  ),
-                                  items: [
-                                    const DropdownMenuItem<String?>(
-                                      value: null, child: Text('Use original category'),
+                            padding: EdgeInsets.all(16.w),
+                            decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(18.r)),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Icon(Icons.label_rounded, color: AppColors.brass, size: 18.r),
+                                8.horizontalSpace,
+                                Text('MY CATEGORY', style: TextStyle(color: AppColors.slate, fontSize: 10.sp, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                              ]),
+                              12.verticalSpace,
+                              InkWell(
+                                borderRadius: BorderRadius.circular(14.r),
+                                onTap: () async {
+                                  final picked = await showDialog<String?>(
+                                    context: context,
+                                    builder: (dialogContext) => Dialog(
+                                      backgroundColor: AppColors.paper,
+                                      insetPadding: EdgeInsets.symmetric(horizontal: 24.w),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24.r)),
+                                      child: Padding(
+                                        padding: EdgeInsets.all(20.w),
+                                        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                          Text('Choose a category', style: TextStyle(color: AppColors.ink, fontSize: 20.sp, fontWeight: FontWeight.w900)),
+                                          6.verticalSpace,
+                                          Text('This label is private to you.', style: TextStyle(color: AppColors.slate, fontSize: 12.sp)),
+                                          18.verticalSpace,
+                                          GridView.count(
+                                            shrinkWrap: true,
+                                            physics: const NeverScrollableScrollPhysics(),
+                                            crossAxisCount: 3,
+                                            mainAxisSpacing: 10.w,
+                                            crossAxisSpacing: 10.w,
+                                            childAspectRatio: 0.88,
+                                            children: [
+                                              _buildCategoryTile(label: 'Original', icon: Icons.auto_awesome_rounded, selected: selected == liveExpense.categoryId, onTap: () => Navigator.pop(dialogContext, null)),
+                                              ...ExpenseCategory.all.map((category) => _buildCategoryTile(label: category.label, icon: category.icon, selected: selected == category.id, onTap: () => Navigator.pop(dialogContext, category.id)),
+                                            ],
+                                          ),
+                                          12.verticalSpace,
+                                          SizedBox(width: double.infinity, child: TextButton(onPressed: () => Navigator.pop(dialogContext, '__cancel__'), child: const Text('Cancel'))),
+                                        ]),
+                                      ),
                                     ),
-                                    ...ExpenseCategory.all.map((category) =>
-                                      DropdownMenuItem<String?>(
-                                        value: category.id,
-                                        child: Text('${category.label}'),
-                                      )),
-                                  ],
-                                  onChanged: snapshot.connectionState == ConnectionState.waiting
-                                      ? null
-                                      : (value) async {
-                                          try {
-                                            await MonthlyBudgetRepository.instance.setMemberCategory(
-                                              groupId: provider.currentGroup!.id,
-                                              expenseId: liveExpense.id,
-                                              uid: provider.uid!,
-                                              categoryId: value == liveExpense.categoryId ? null : value,
-                                            );
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Your category was saved.')),
-                                            );
-                                          } catch (_) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Could not save your category.')),
-                                            );
-                                          }
-                                        },
+                                  );
+                                  if (!context.mounted || picked == '__cancel__') return;
+                                  final newCategory = picked == null ? null : picked;
+                                  try {
+                                    await MonthlyBudgetRepository.instance.setMemberCategory(
+                                      groupId: provider.currentGroup!.id,
+                                      expenseId: liveExpense.id,
+                                      uid: provider.uid!,
+                                      categoryId: newCategory == liveExpense.categoryId ? null : newCategory,
+                                    );
+                                    if (!context.mounted) return;
+                                    messenger.showSnackBar(const SnackBar(content: Text('Your category was saved.')));
+                                  } catch (error) {
+                                    if (!context.mounted) return;
+                                    messenger.showSnackBar(SnackBar(content: Text('Could not save category: $error')));
+                                  }
+                                },
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 14.h),
+                                  decoration: BoxDecoration(border: Border.all(color: AppColors.ink.withValues(alpha: 0.15)), borderRadius: BorderRadius.circular(14.r), color: AppColors.paperDim.withValues(alpha: 0.35)),
+                                  child: Row(children: [
+                                    Container(padding: EdgeInsets.all(10.r), decoration: BoxDecoration(color: AppColors.brass.withValues(alpha: 0.12), shape: BoxShape.circle), child: Icon(selectedCategory?.icon ?? Icons.auto_awesome_rounded, color: AppColors.brass, size: 22.r)),
+                                    12.horizontalSpace,
+                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Text(selectedCategory?.label ?? 'Original category', style: TextStyle(color: AppColors.ink, fontSize: 14.sp, fontWeight: FontWeight.w800)),
+                                      3.verticalSpace,
+                                      Text('Tap to change', style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
+                                    ])),
+                                    Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.slate, size: 22.r),
+                                  ]),
                                 ),
-                                5.verticalSpace,
-                                Text('Only you see this category. It does not change the group expense.',
-                                  style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
-                              ],
-                            ),
+                              ),
+                              10.verticalSpace,
+                              Text('Only you see this category. It does not change the group expense.', style: TextStyle(color: AppColors.slate, fontSize: 11.sp, height: 1.4)),
+                            ]),
                           );
                         },
                       ),
