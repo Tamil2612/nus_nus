@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import '../models/expense.dart';
+import '../models/expense_category.dart';
 import '../models/person.dart';
 import '../providers/split_provider.dart';
 import '../theme/app_colors.dart';
@@ -28,6 +29,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
   final Map<int, TextEditingController> _customSplitCtrls = {};
   bool _prefilled = false;
   String? _formError;
+  String? _categoryId;
 
   @override
   void initState() {
@@ -38,6 +40,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
       _descCtrl.text = existing.desc;
       _amountCtrl.text = existing.amount.toStringAsFixed(2);
       _payerId = existing.payerId;
+      _categoryId = existing.categoryId;
       _splitSelection.addAll(existing.splitMap.keys);
       final shares = existing.splitMap.values.toList();
       final allEqual = shares.isNotEmpty &&
@@ -120,6 +123,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
             payerId: _payerId,
             splitWith: _splitSelection,
             customSplits: customSplits,
+            categoryId: _categoryId,
+            clearCategory: _categoryId == null && widget.existingExpense!.categoryId != null,
           )
         : provider.addExpense(
             desc: _descCtrl.text,
@@ -127,6 +132,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
             payerId: _payerId,
             splitWith: _splitSelection,
             customSplits: customSplits,
+            categoryId: _categoryId,
           );
 
     if (error != null) {
@@ -528,6 +534,46 @@ class _ExpenseFormState extends State<ExpenseForm> {
     );
   }
 
+
+  Widget _buildCategorySelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('Category', trailing: 'Optional'),
+        Wrap(
+          spacing: 8.w,
+          runSpacing: 8.h,
+          children: [
+            _categoryChip(null, 'None', Icons.remove_circle_outline_rounded),
+            ...ExpenseCategory.all.map((category) =>
+                _categoryChip(category.id, category.label, category.icon)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _categoryChip(String? id, String label, IconData icon) {
+    final selected = _categoryId == id;
+    return ChoiceChip(
+      selected: selected,
+      onSelected: (_) => setState(() => _categoryId = id),
+      avatar: Icon(icon, size: 15.r,
+          color: selected ? AppColors.paper : AppColors.slate),
+      label: Text(label),
+      labelStyle: TextStyle(
+        color: selected ? AppColors.paper : AppColors.ink,
+        fontSize: 10.5.sp,
+        fontWeight: FontWeight.w700,
+      ),
+      selectedColor: AppColors.ink,
+      backgroundColor: Colors.white,
+      side: BorderSide(color: selected ? AppColors.ink : AppColors.line),
+      showCheckmark: false,
+      padding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SplitProvider>();
@@ -552,6 +598,8 @@ class _ExpenseFormState extends State<ExpenseForm> {
               _buildDescriptionField(),
               15.verticalSpace,
               _buildAmountField(currency, prominent: true),
+              14.verticalSpace,
+              _buildCategorySelector(),
             ],
           ),
         ),

@@ -14,6 +14,12 @@ import '../widgets/app_dialog.dart';
 import 'ai_expense_screen.dart';
 import 'group_detail_screen.dart';
 import 'personal_ledger_screen.dart';
+import '../models/monthly_budget.dart';
+import '../models/expense_category.dart';
+import '../data/monthly_budget_repository.dart';
+import '../services/monthly_spending_calculator.dart';
+import 'monthly_report_screen.dart';
+import 'budget_setup_screen.dart';
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
@@ -361,6 +367,8 @@ class _HomeTabState extends State<_HomeTab> {
             ],
           ),
         ),
+        _MonthlyBudgetCard(),
+        12.verticalSpace,
         _PersonalCard(
           group: personal,
           loading: provider.isLoading || provider.isEnsuringPersonalGroup,
@@ -375,6 +383,12 @@ class _HomeTabState extends State<_HomeTab> {
             const Expanded(
               child: _SectionHeader(
                   title: 'Shared groups', subtitle: 'Spending together'),
+            ),
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const MonthlyReportScreen())),
+              icon: Icon(Icons.insights_rounded, size: 16.r, color: AppColors.brassSoft),
+              label: Text('Reports', style: TextStyle(color: AppColors.brassSoft, fontSize: 11.sp)),
             ),
             FilledButton.icon(
               onPressed: widget.onAddGroup,
@@ -467,6 +481,154 @@ class _HomeTabState extends State<_HomeTab> {
         else
           ...shared.map((g) => _GroupTile(group: g)),
       ],
+    );
+  }
+}
+
+
+
+class _MonthlyBudgetCard extends StatefulWidget {
+  const _MonthlyBudgetCard();
+
+  @override
+  State<_MonthlyBudgetCard> createState() => _MonthlyBudgetCardState();
+}
+
+class _MonthlyBudgetCardState extends State<_MonthlyBudgetCard> {
+  Future<void> _openBudgetSetup(
+    BuildContext context,
+    String uid,
+    String currency,
+    MonthlyBudget? current,
+  ) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => BudgetSetupScreen(
+          uid: uid,
+          currency: currency,
+          initialBudget: current,
+        ),
+      ),
+    );
+    if (saved == true && mounted) setState(() {});
+  }
+
+  void _openReport(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MonthlyReportScreen()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<SplitProvider>();
+    final uid = provider.uid;
+    if (uid == null) return const SizedBox.shrink();
+    final now = DateTime.now();
+    final monthId = MonthlyBudget.monthKey(now);
+    final currency = provider.personalGroup?.currency ?? 'AED';
+    return FutureBuilder<MonthlyBudget?>(
+      future: MonthlyBudgetRepository.instance.getBudget(uid, monthId),
+      builder: (context, snapshot) {
+        final budget = snapshot.data;
+        final spending = MonthlySpendingCalculator.calculate(
+          groups: provider.groups,
+          uid: uid,
+          month: now,
+          currency: currency,
+        );
+        final limit = budget?.amount ?? 0;
+        final spent = spending.total;
+        final progress = limit > 0 ? (spent / limit).clamp(0.0, 1.0) : 0.0;
+        final exceeded = limit > 0 && spent > limit;
+        final remaining = limit - spent;
+        final color = exceeded ? AppColors.rust : AppColors.brass;
+        return Material(
+          color: AppColors.paper,
+          borderRadius: BorderRadius.circular(17.r),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(17.r),
+            onTap: () => _openReport(context),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 15.w, vertical: 12.h),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(17.r),
+                border: Border.all(color: AppColors.brass.withValues(alpha: .3)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    Icon(Icons.account_balance_wallet_outlined,
+                      color: AppColors.brass, size: 19.r),
+                    9.horizontalSpace,
+                    Expanded(child: Text('MONTHLY BUDGET',
+                      style: TextStyle(color: AppColors.slate, fontSize: 10.sp,
+                        fontWeight: FontWeight.w900, letterSpacing: 1.05))),
+                    if (snapshot.hasError)
+                      Text('Unavailable', style: TextStyle(
+                        color: AppColors.rust, fontSize: 10.sp))
+                    else if (budget == null)
+                      TextButton(
+                        onPressed: () => _openBudgetSetup(
+                          context, uid, currency, null),
+                        child: const Text('Set budget'),
+                      )
+                    else ...[
+                      TextButton(
+                        onPressed: () => _openBudgetSetup(
+                          context, uid, currency, budget),
+                        style: TextButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 4.h),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text('Edit', style: TextStyle(fontSize: 10.sp)),
+                      ),
+                      Icon(Icons.chevron_right, color: AppColors.slate, size: 20.r),
+                    ],
+                  ]),
+                  if (snapshot.connectionState == ConnectionState.waiting && budget == null)
+                    const LinearProgressIndicator()
+                  else if (budget != null) ...[
+                    5.verticalSpace,
+                    Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Expanded(child: Text(fmtCurrency(spent, currency),
+                        style: TextStyle(color: AppColors.ink, fontSize: 21.sp,
+                          fontWeight: FontWeight.w900, fontFamily: 'Georgia'))),
+                      Text('of ${fmtCurrency(limit, currency)}',
+                        style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
+                    ]),
+                    8.verticalSpace,
+                    ClipRRect(borderRadius: BorderRadius.circular(8.r),
+                      child: LinearProgressIndicator(value: progress, minHeight: 6.h,
+                        backgroundColor: AppColors.paperDim, color: color)),
+                    6.verticalSpace,
+                    Row(children: [
+                      Expanded(child: Text(exceeded
+                        ? '${fmtCurrency(-remaining, currency)} over budget'
+                        : '${fmtCurrency(remaining, currency)} remaining',
+                        style: TextStyle(color: color, fontSize: 10.sp,
+                          fontWeight: FontWeight.w800))),
+                      Text('View details',
+                        style: TextStyle(color: AppColors.slate, fontSize: 10.sp,
+                          fontWeight: FontWeight.w700)),
+                    ]),
+                  ] else if (!snapshot.hasError)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: 3.h),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Set a monthly limit and category allocations',
+                          style: TextStyle(color: AppColors.slate, fontSize: 11.sp)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

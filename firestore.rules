@@ -20,6 +20,31 @@ service cloud.firestore {
       allow delete: if isOwner() &&
         resource.data.get('accountDeletionInProgress', false) != true;
 
+      match /budgets/{monthId} {
+        function validMonth() {
+          return monthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
+        }
+        function validBudget() {
+          return request.resource.data.keys().hasOnly(['amount', 'currency', 'categoryBudgets', 'updatedAt']) &&
+            request.resource.data.amount is number &&
+            request.resource.data.amount > 0 &&
+            request.resource.data.amount <= 100000000 &&
+            request.resource.data.currency is string &&
+            request.resource.data.currency.size() == 3 &&
+            request.resource.data.categoryBudgets is map &&
+            request.resource.data.categoryBudgets.keys().hasOnly(
+              ['food','transport','shopping','rent','bills','entertainment','health','education','other']);
+        }
+        allow read: if isOwner() && validMonth();
+        allow create, update: if isOwner() && validMonth() &&
+          get(/databases/$(database)/documents/users/$(uid)).data
+            .get('accountDeletionInProgress', false) != true &&
+          validBudget();
+        allow delete: if isOwner() && validMonth() &&
+          get(/databases/$(database)/documents/users/$(uid)).data
+            .get('accountDeletionInProgress', false) != true;
+      }
+
       match /private/{document=**} {
         allow read: if isOwner();
         allow write: if isOwner() &&
@@ -196,6 +221,18 @@ service cloud.firestore {
         allow delete: if accountCanWrite() && isGroupMember() &&
           request.auth.uid == resource.data.addedBy &&
           resource.data.get('settledAmounts', {}).size() == 0;
+      }
+
+      // Personal category overrides are private to the member who owns the document.
+      match /expenses/{expenseId}/memberCategories/{uid} {
+        function canReadExpense() {
+          return request.auth != null && request.auth.uid in
+            get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+        }
+        allow read: if request.auth != null && request.auth.uid == uid && canReadExpense();
+        // Writes go through setMemberExpenseCategory, which verifies that this
+        // account has an allocated share in the referenced expense.
+        allow create, update, delete: if false;
       }
 
       // Settlement audit entries are written only by trusted Admin SDK callables.

@@ -159,6 +159,21 @@ test('uneven custom splits each show the right amount', async () => {
   assert.match(bodyFor('z'), /AED 74\.50/);
 });
 
+test('duplicate stored tokens only receive one notification', async () => {
+  const db = fakeDb({
+    'groups/g1': group,
+    'users/S/private/push': push('s-phone', 's-phone'),
+  });
+  const messaging = fakeMessaging();
+  const stats = await sendExpenseNotifications({
+    db, messaging, fieldValue, groupId: 'g1', expenseId: 'e1',
+    expense: { desc: 'Dinner', payerId: 1, addedBy: 'A', splitMap: { 2: 10 } },
+  });
+  assert.deepEqual(messaging.sent.map((m) => m.token), ['s-phone']);
+  assert.equal(stats.devices, 1);
+  assert.equal(stats.sent, 1);
+});
+
 test('dead tokens are removed, other failures are kept', async () => {
   const db = fakeDb({
     'groups/g1': group,
