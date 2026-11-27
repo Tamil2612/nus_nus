@@ -16,13 +16,21 @@ class MemberExpenseCategorySelector extends StatefulWidget {
   final String expenseId;
   final String uid;
   final String? originalCategoryId;
-  const MemberExpenseCategorySelector({super.key, required this.groupId, required this.expenseId, required this.uid, required this.originalCategoryId});
+
+  const MemberExpenseCategorySelector(
+      {super.key,
+      required this.groupId,
+      required this.expenseId,
+      required this.uid,
+      required this.originalCategoryId});
 
   @override
-  State<MemberExpenseCategorySelector> createState() => _MemberExpenseCategorySelectorState();
+  State<MemberExpenseCategorySelector> createState() =>
+      _MemberExpenseCategorySelectorState();
 }
 
-class _MemberExpenseCategorySelectorState extends State<MemberExpenseCategorySelector> {
+class _MemberExpenseCategorySelectorState
+    extends State<MemberExpenseCategorySelector> {
   String? _selected;
   bool _loading = true;
   bool _saving = false;
@@ -36,7 +44,10 @@ class _MemberExpenseCategorySelectorState extends State<MemberExpenseCategorySel
 
   Future<void> _load() async {
     try {
-      final value = await MonthlyBudgetRepository.instance.getMemberCategory(groupId: widget.groupId, expenseId: widget.expenseId, uid: widget.uid);
+      final value = await MonthlyBudgetRepository.instance.getMemberCategory(
+          groupId: widget.groupId,
+          expenseId: widget.expenseId,
+          uid: widget.uid);
       if (!mounted) return;
       setState(() => _selected = value ?? widget.originalCategoryId);
     } catch (_) {
@@ -46,21 +57,40 @@ class _MemberExpenseCategorySelectorState extends State<MemberExpenseCategorySel
     }
   }
 
-  Widget _tile({required String label, required IconData icon, required bool selected, required VoidCallback onTap}) {
+  Widget _tile(
+      {required String label,
+      required IconData icon,
+      required bool selected,
+      required VoidCallback onTap}) {
     return InkWell(
       borderRadius: BorderRadius.circular(14.r),
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: selected ? AppColors.brass.withValues(alpha: 0.16) : AppColors.paperDim.withValues(alpha: 0.45),
+          color: selected
+              ? AppColors.brass.withValues(alpha: 0.16)
+              : AppColors.paperDim.withValues(alpha: 0.45),
           borderRadius: BorderRadius.circular(14.r),
-          border: Border.all(color: selected ? AppColors.brass : AppColors.ink.withValues(alpha: 0.08), width: selected ? 1.6 : 1),
+          border: Border.all(
+              color: selected
+                  ? AppColors.brass
+                  : AppColors.ink.withValues(alpha: 0.08),
+              width: selected ? 1.6 : 1),
         ),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, color: selected ? AppColors.brass : AppColors.ink, size: 24.r),
+          Icon(icon,
+              color: selected ? AppColors.brass : AppColors.ink, size: 24.r),
           7.verticalSpace,
-          Text(label, textAlign: TextAlign.center, style: TextStyle(color: AppColors.ink, fontSize: 10.sp, fontWeight: FontWeight.w800)),
-          if (selected) ...[3.verticalSpace, Icon(Icons.check_circle_rounded, color: AppColors.brass, size: 14.r)],
+          Text(label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 10.sp,
+                  fontWeight: FontWeight.w800)),
+          if (selected) ...[
+            3.verticalSpace,
+            Icon(Icons.check_circle_rounded, color: AppColors.brass, size: 14.r)
+          ],
         ]),
       ),
     );
@@ -74,44 +104,79 @@ class _MemberExpenseCategorySelectorState extends State<MemberExpenseCategorySel
       builder: (dialogContext) => Dialog(
         backgroundColor: AppColors.paper,
         insetPadding: EdgeInsets.symmetric(horizontal: 24.w),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24.r)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24.r)),
         child: Padding(
           padding: EdgeInsets.all(20.w),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Choose a category', style: TextStyle(color: AppColors.ink, fontSize: 20.sp, fontWeight: FontWeight.w900)),
-            5.verticalSpace,
-            Text('This label is private to you.', style: TextStyle(color: AppColors.slate, fontSize: 12.sp)),
-            16.verticalSpace,
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 3,
-              mainAxisSpacing: 10.w,
-              crossAxisSpacing: 10.w,
-              childAspectRatio: 0.88,
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _tile(label: 'Original', icon: Icons.auto_awesome_rounded, selected: _selected == widget.originalCategoryId, onTap: () => Navigator.pop(dialogContext, '__original__')),
-                ...ExpenseCategory.all.map((cat) => _tile(label: cat.label, icon: cat.icon, selected: _selected == cat.id, onTap: () => Navigator.pop(dialogContext, cat.id))),
-              ],
-            ),
-            12.verticalSpace,
-            SizedBox(width: double.infinity, child: TextButton(onPressed: () => Navigator.pop(dialogContext, '__cancel__'), child: const Text('Cancel'))),
-          ]),
+                Text('Choose a category',
+                    style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 20.sp,
+                        fontWeight: FontWeight.w900)),
+                5.verticalSpace,
+                Text('This label is private to you.',
+                    style: TextStyle(color: AppColors.slate, fontSize: 12.sp)),
+                16.verticalSpace,
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 10.w,
+                  crossAxisSpacing: 10.w,
+                  childAspectRatio: 0.88,
+                  children: [
+                    _tile(
+                        label: 'Original',
+                        icon: Icons.auto_awesome_rounded,
+                        selected: _selected == widget.originalCategoryId,
+                        onTap: () =>
+                            Navigator.pop(dialogContext, '__original__')),
+                    ...ExpenseCategory.all.map((cat) => _tile(
+                        label: cat.label,
+                        icon: cat.icon,
+                        selected: _selected == cat.id,
+                        onTap: () => Navigator.pop(dialogContext, cat.id))),
+                  ],
+                ),
+                12.verticalSpace,
+                SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                        onPressed: () =>
+                            Navigator.pop(dialogContext, '__cancel__'),
+                        child: const Text('Cancel'))),
+              ]),
         ),
       ),
     );
     if (!mounted || picked == null || picked == '__cancel__') return;
     final value = picked == '__original__' ? null : picked;
     final optimistic = value ?? widget.originalCategoryId;
-    setState(() { _selected = optimistic; _saving = true; });
+    setState(() {
+      _selected = optimistic;
+      _saving = true;
+    });
     try {
-      await MonthlyBudgetRepository.instance.setMemberCategory(groupId: widget.groupId, expenseId: widget.expenseId, uid: widget.uid, categoryId: value);
+      await MonthlyBudgetRepository.instance.setMemberCategory(
+          groupId: widget.groupId,
+          expenseId: widget.expenseId,
+          uid: widget.uid,
+          categoryId: value);
       if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(behavior: SnackBarBehavior.floating, content: Text('Your category was saved.')));
+      messenger.showSnackBar(const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Your category was saved.')));
     } catch (error) {
       if (!mounted) return;
-      setState(() => _selected = _selected); // retain optimistic choice; reload authoritative value below
-      messenger.showSnackBar(SnackBar(behavior: SnackBarBehavior.floating, content: Text('Could not save category: $error')));
+      setState(() => _selected =
+          _selected); // retain optimistic choice; reload authoritative value below
+      messenger.showSnackBar(SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Could not save category: $error')));
       await _load();
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -124,30 +189,73 @@ class _MemberExpenseCategorySelectorState extends State<MemberExpenseCategorySel
     return Container(
       margin: EdgeInsets.only(bottom: 18.h),
       padding: EdgeInsets.all(16.w),
-      decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(18.r)),
+      decoration: BoxDecoration(
+          color: AppColors.paper, borderRadius: BorderRadius.circular(18.r)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Icon(Icons.label_rounded, color: AppColors.brass, size: 18.r), 8.horizontalSpace, Text('MY CATEGORY', style: TextStyle(color: AppColors.slate, fontSize: 10.sp, fontWeight: FontWeight.w900, letterSpacing: 1.2))]),
+        Row(children: [
+          Icon(Icons.label_rounded, color: AppColors.brass, size: 18.r),
+          8.horizontalSpace,
+          Text('MY CATEGORY',
+              style: TextStyle(
+                  color: AppColors.slate,
+                  fontSize: 10.sp,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.2))
+        ]),
         12.verticalSpace,
         InkWell(
           borderRadius: BorderRadius.circular(14.r),
           onTap: _choose,
           child: Container(
             padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 14.h),
-            decoration: BoxDecoration(border: Border.all(color: AppColors.ink.withValues(alpha: 0.15)), borderRadius: BorderRadius.circular(14.r), color: AppColors.paperDim.withValues(alpha: 0.35)),
+            decoration: BoxDecoration(
+                border:
+                    Border.all(color: AppColors.ink.withValues(alpha: 0.15)),
+                borderRadius: BorderRadius.circular(14.r),
+                color: AppColors.paperDim.withValues(alpha: 0.35)),
             child: Row(children: [
-              Container(padding: EdgeInsets.all(10.r), decoration: BoxDecoration(color: AppColors.brass.withValues(alpha: 0.12), shape: BoxShape.circle), child: Icon(cat?.icon ?? Icons.auto_awesome_rounded, color: AppColors.brass, size: 22.r)),
+              Container(
+                  padding: EdgeInsets.all(10.r),
+                  decoration: BoxDecoration(
+                      color: AppColors.brass.withValues(alpha: 0.12),
+                      shape: BoxShape.circle),
+                  child: Icon(cat?.icon ?? Icons.auto_awesome_rounded,
+                      color: AppColors.brass, size: 22.r)),
               12.horizontalSpace,
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_loading ? 'Loading category...' : (cat?.label ?? 'Original category'), style: TextStyle(color: AppColors.ink, fontSize: 14.sp, fontWeight: FontWeight.w800)),
-                3.verticalSpace,
-                Text(_saving ? 'Saving...' : 'Tap to change', style: TextStyle(color: AppColors.slate, fontSize: 10.sp)),
-              ])),
-              if (_saving || _loading) SizedBox(width: 16.r, height: 16.r, child: const CircularProgressIndicator(strokeWidth: 2, color: AppColors.brass)) else Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.slate, size: 22.r),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(
+                        _loading
+                            ? 'Loading category...'
+                            : (cat?.label ?? 'Original category'),
+                        style: TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 14.sp,
+                            fontWeight: FontWeight.w800)),
+                    3.verticalSpace,
+                    Text(_saving ? 'Saving...' : 'Tap to change',
+                        style:
+                            TextStyle(color: AppColors.slate, fontSize: 10.sp)),
+                  ])),
+              if (_saving || _loading)
+                SizedBox(
+                    width: 16.r,
+                    height: 16.r,
+                    child: const CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.brass))
+              else
+                Icon(Icons.keyboard_arrow_down_rounded,
+                    color: AppColors.slate, size: 22.r),
             ]),
           ),
         ),
         10.verticalSpace,
-        Text('Only you see this category. It does not change the group expense.', style: TextStyle(color: AppColors.slate, fontSize: 11.sp, height: 1.4)),
+        Text(
+            'Only you see this category. It does not change the group expense.',
+            style: TextStyle(
+                color: AppColors.slate, fontSize: 11.sp, height: 1.4)),
       ]),
     );
   }
@@ -193,32 +301,12 @@ class ExpenseDetailScreen extends StatelessWidget {
       final error = provider.removeExpense(live.id);
       if (!context.mounted) return;
       if (error != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(behavior: SnackBarBehavior.floating, content: Text(error)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            behavior: SnackBarBehavior.floating, content: Text(error)));
         return;
       }
       Navigator.pop(context);
     }
-  }
-
-  Widget _buildCategoryTile({required String label, required IconData icon, required bool selected, required VoidCallback onTap}) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14.r),
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: selected ? AppColors.brass.withValues(alpha: 0.15) : AppColors.paperDim.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(14.r),
-          border: Border.all(color: selected ? AppColors.brass : AppColors.ink.withValues(alpha: 0.08), width: selected ? 1.6 : 1),
-        ),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, color: selected ? AppColors.brass : AppColors.ink, size: 24.r),
-          8.verticalSpace,
-          Text(label, textAlign: TextAlign.center, style: TextStyle(color: AppColors.ink, fontSize: 10.sp, fontWeight: FontWeight.w800)),
-          if (selected) ...[4.verticalSpace, Icon(Icons.check_circle_rounded, color: AppColors.brass, size: 14.r)],
-        ]),
-      ),
-    );
   }
 
   @override
@@ -261,7 +349,8 @@ class ExpenseDetailScreen extends StatelessWidget {
 
     final payer = provider.personById(liveExpense.payerId);
     final myGroupMembers = provider.currentGroup!.members
-        .where((p) => p.linkedUserId == provider.uid).toList();
+        .where((p) => p.linkedUserId == provider.uid)
+        .toList();
     final splitParticipants = liveExpense.splitWith
         .map((id) => provider.personById(id))
         .where((p) => p != null)
@@ -478,10 +567,10 @@ class ExpenseDetailScreen extends StatelessWidget {
 
                     24.verticalSpace,
 
-
                     if (!provider.currentGroup!.isPersonal &&
                         myGroupMembers.isNotEmpty &&
-                        liveExpense.splitMap.containsKey(myGroupMembers.first.id))
+                        liveExpense.splitMap
+                            .containsKey(myGroupMembers.first.id))
                       MemberExpenseCategorySelector(
                         groupId: provider.currentGroup!.id,
                         expenseId: liveExpense.id,
@@ -524,8 +613,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                       final isSettled = liveExpense.isPersonPaid(person.id);
                       final isPartial =
                           liveExpense.isPersonPartiallyPaid(person.id);
-                      final canToggleThisShare = canToggle &&
-                          !isPayer && !settledViaPair;
+                      final canToggleThisShare =
+                          canToggle && !isPayer && !settledViaPair;
 
                       return GestureDetector(
                         onTap: canToggleThisShare
@@ -650,7 +739,6 @@ class ExpenseDetailScreen extends StatelessWidget {
                         ),
                       );
                     }),
-
                     40.verticalSpace,
                   ],
                 ),

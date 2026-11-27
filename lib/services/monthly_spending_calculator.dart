@@ -1,4 +1,3 @@
-import '../models/expense.dart';
 import '../models/group.dart';
 
 class MonthlySpending {
