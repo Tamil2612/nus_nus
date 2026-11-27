@@ -396,8 +396,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                                             crossAxisSpacing: 10.w,
                                             childAspectRatio: 0.88,
                                             children: [
-                                              _buildCategoryTile(label: 'Original', icon: Icons.auto_awesome_rounded, selected: selected == liveExpense.categoryId, onTap: () => Navigator.pop(dialogContext, null)),
-                                              ...ExpenseCategory.all.map((category) => _buildCategoryTile(label: category.label, icon: category.icon, selected: selected == category.id, onTap: () => Navigator.pop(dialogContext, category.id)),
+                                              _buildCategoryTile(label: 'Original', icon: Icons.auto_awesome_rounded, selected: selected == liveExpense.categoryId, onTap: () => Navigator.pop(dialogContext, '__original__'))),
+                                              ...ExpenseCategory.all.map((category) => _buildCategoryTile(label: category.label, icon: category.icon, selected: selected == category.id, onTap: () => Navigator.pop(dialogContext, category.id))),
                                             ],
                                           ),
                                           12.verticalSpace,
@@ -406,8 +406,8 @@ class ExpenseDetailScreen extends StatelessWidget {
                                       ),
                                     ),
                                   );
-                                  if (!context.mounted || picked == '__cancel__') return;
-                                  final newCategory = picked == null ? null : picked;
+                                  if (!context.mounted || picked == null || picked == '__cancel__') return;
+                                  final newCategory = picked == '__original__' ? null : picked;
                                   try {
                                     await MonthlyBudgetRepository.instance.setMemberCategory(
                                       groupId: provider.currentGroup!.id,
